@@ -1,4 +1,4 @@
-# MTMCT для RTX 3070 Ti
+# MTMCT Framework
 
 Запускаемый baseline межкамерного трекинга людей: YOLO26l + ByteTrack + OSNet x1.0.
 
@@ -10,7 +10,7 @@
 
 ```bat
 conda activate neuro_clean
-cd /d "D:\rabochaya papka\нейро\MTMCT_GPU_3070Ti"
+cd /d "C:\path\to\mtmct-framework"
 python -m mtmct
 ```
 
@@ -21,7 +21,7 @@ python -m pip install -e ".[dev]"
 python -m pytest -q
 ```
 
-Или запусти `run_demo_3070ti.cmd`. Одна команда скачивает недостающие видео, выполняет локальный трекинг, связывает Local ID в Global ID, создаёт CSV и `mosaic.mp4`.
+Или запусти `run_demo.cmd`. Одна команда скачивает недостающие видео, выполняет локальный трекинг, связывает Local ID в Global ID, создаёт CSV и `mosaic.mp4`.
 
 Стандартный сценарий:
 
@@ -44,6 +44,7 @@ python -m mtmct --cameras 3 15 --max-frames 900 --conf 0.10 --min-similarity 0.8
 Полезные параметры:
 
 - `--max-frames 0` — обработать видео целиком;
+- `--device cuda:0` — выбрать NVIDIA GPU или `--device cpu` для запуска без CUDA;
 - `--imgsz 768` — уменьшить нагрузку на GPU;
 - `--min-similarity 0.85` — ещё строже связывать Local ID;
 - `--link-only` — пересчитать Global ID без повторного YOLO/OSNet;
