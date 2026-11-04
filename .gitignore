@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local models, datasets and generated artifacts
+data/
+runs/
+weights/
+*.pt
+*.pth
+*.mp4
+*.h5
+
+# Local tooling and IDE state
+.codegraph/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
