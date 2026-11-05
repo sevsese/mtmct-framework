@@ -241,5 +241,40 @@ Global IDF1. Сохранённые top-20 samples предназначены д
 
 Следующий этап: **06 — Tracklet Refinement с dry-run и provenance**.
 
-Коммит: `feat: aggregate quality-aware features` (этот коммит).
+Коммит: `2bbc3b6 feat: aggregate quality-aware features`.
+
+## Этап 06 — Tracklet Refinement
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. Dry-run диагностирует appearance jump и same-camera fragment merge без мутации входа.
+2. Auto split создаёт новые camera-local ID по диапазонам кадров.
+3. Auto merge разрешён только при положительном gap, сильном appearance и отсутствии overlap.
+4. Observation CSV переписывается по frame ranges, а provenance сохраняет исходные Local ID.
+5. Режим OFF возвращает побайтно эквивалентные структуры и остаётся default.
+
+Изменённые файлы: `mtmct/refinement.py`, `mtmct/tracking.py`, `mtmct/oracle.py`,
+`tests/test_refinement.py`, `README.md`, `docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+Проверки: targeted refinement tests — PASS: 3; полный pytest — **32 passed**.
+
+Real dry-run на `v2_baseline_cam3_15` нашёл 0 split и 2 merge-кандидата:
+camera 3 gap 58/similarity 0.925388 и camera 15 gap 5/similarity 0.925298.
+
+| Режим | Tracklets | Global IDF1 | Pairwise F1 |
+|---|---:|---:|---:|
+| baseline | 70 | **0.397140** | **0.885740** |
+| auto merge | 68 | 0.394133 | 0.879680 |
+
+Решение: auto refinement остаётся **OFF**, потому что merge ухудшил обе метрики.
+Split на реальном старом cache не оценивался: временные feature frames появились
+только в новом формате; unit-инварианты и provenance проверены синтетически.
+
+Артефакты: `runs/v2_refinement_dry_cam3_15`, `runs/v2_refinement_merge_cam3_15`.
+
+Следующий этап: **07 — constrained graph association и полный журнал решений**.
+
+Коммит: `feat: refine tracklets` (этот коммит).
 

@@ -124,8 +124,9 @@ def run(scene_dir: Path, output: Path, model_name: str,
                             row["embedding_sum"]=np.zeros_like(e,dtype=np.float64)
                         row["embedding_sum"]+=e
                         row["samples"]+=1
-                        row["feature_samples"].append((quality,e.tolist()))
-                        row["feature_samples"] = sorted(row["feature_samples"], reverse=True)[:MAX_SAMPLES]
+                        row["feature_samples"].append((quality,fid,e.tolist()))
+                        row["feature_samples"] = sorted(
+                            row["feature_samples"], key=lambda sample: -sample[0])[:MAX_SAMPLES]
                     if fid%100==0:
                         print(f" camera={cam} frame={fid} tracks={len(by_id)}",flush=True)
                     fid+=1
@@ -149,7 +150,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                   "positions":track["positions"],
                                   "embedding":normalized(emb).tolist() if emb is not None else [],
                                   "feature_quality":[sample[0] for sample in track["feature_samples"]],
-                                  "feature_vectors":[sample[1] for sample in track["feature_samples"]],
+                                  "feature_frames":[sample[1] for sample in track["feature_samples"]],
+                                  "feature_vectors":[sample[2] for sample in track["feature_samples"]],
                                   "samples":track["samples"]})
             del model
             if device.startswith("cuda"):

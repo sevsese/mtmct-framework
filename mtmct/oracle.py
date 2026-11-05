@@ -93,8 +93,9 @@ def generate(scene_dir: Path, output: Path, cameras: list[int], max_frames: int,
                             track["embedding_sum"] = np.zeros_like(embedding, dtype=np.float64)
                         track["embedding_sum"] += embedding
                         track["samples"] += 1
-                        track["feature_samples"].append((quality, embedding.tolist()))
-                        track["feature_samples"] = sorted(track["feature_samples"], reverse=True)[:MAX_SAMPLES]
+                        track["feature_samples"].append((quality, frame_index, embedding.tolist()))
+                        track["feature_samples"] = sorted(
+                            track["feature_samples"], key=lambda sample: -sample[0])[:MAX_SAMPLES]
             finally:
                 capture.release()
             seconds = time.perf_counter() - started
@@ -111,7 +112,8 @@ def generate(scene_dir: Path, output: Path, cameras: list[int], max_frames: int,
             "positions": [],
             "embedding": normalized(embedding).tolist() if embedding is not None else [],
             "feature_quality": [sample[0] for sample in track["feature_samples"]],
-            "feature_vectors": [sample[1] for sample in track["feature_samples"]],
+            "feature_frames": [sample[1] for sample in track["feature_samples"]],
+            "feature_vectors": [sample[2] for sample in track["feature_samples"]],
             "samples": track["samples"],
             "source": "oracle_gt_bbox",
         })

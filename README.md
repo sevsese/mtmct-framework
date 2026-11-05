@@ -93,6 +93,10 @@ Tracking сохраняет не более 20 лучших feature samples на
 `first`, `mean`, `topk` и `prototypes` можно сравнивать offline через
 `python -m mtmct.features`; по текущему A/B обычный `mean` остаётся default.
 
+Tracklet refinement запускается отдельно через `python -m mtmct.refinement`.
+Без `--auto-split/--auto-merge` он только пишет dry-run отчёт; автоматический
+режим по умолчанию выключен, поскольку текущий merge A/B ухудшил IDF1.
+
 ## Диагностика
 
 ```bat
