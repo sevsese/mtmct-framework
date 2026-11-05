@@ -10,6 +10,9 @@
 | Fusion & Evaluation | `mtmct/association.py`, `mtmct/evaluate.py`, `mtmct/export.py` | Global ID, метрики и submission |
 
 `python -m mtmct` связывает этапы. Дорогой результат tracking/ReID сохраняется в `local_tracklets.json`; глобальное сопоставление можно повторять через `--link-only`.
+Новый tracking-run также сохраняет `manifest.json`. Link-only проверяет detector,
+размер признаков и доступные исходные файлы, но допускает offline-работу, когда
+исходные MP4 намеренно отсутствуют.
 
 ## Контракты между этапами
 
@@ -24,6 +27,12 @@
 ### global_ids.json
 
 Список соответствий `(camera_id, local_id) -> global_id`.
+
+### manifest.json
+
+Версия схемы, git SHA, сцена, камеры, tracking-конфигурация, модели, размер
+embedding, размеры и SHA-256 входов. Параметры association не входят в tracking
+cache key, поэтому их можно менять без повторного GPU inference.
 
 Эти три формата — стабильная граница командной работы. Новые интерфейсы добавляются только при появлении второй реальной реализации компонента.
 

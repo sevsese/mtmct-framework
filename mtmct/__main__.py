@@ -4,9 +4,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from .association import Config, associate, load_tracklets, save_mapping
+from .association import Config
 from .download import download
-from .export import export_predictions
+from .link import run as link_run
 from .tracking import run
 from .visualize import render
 
@@ -39,30 +39,28 @@ def main():
     tag="_".join(map(str,a.cameras))
     out=a.out or Path("runs")/f"{a.scene.lower()}_cam{tag}"
     scene_dir=a.data_root/"MTMC_Tracking_2026"/a.split/a.scene
-    required=[scene_dir/"calibration.json",*(scene_dir/"videos"/f"Camera_{c:04d}.mp4" for c in a.cameras)]
-    missing=[path for path in required if not path.exists()]
-    if missing and a.no_download:
-        raise FileNotFoundError(f"Missing inputs: {missing}")
-    if missing:
-        download(a.split,a.scene,a.cameras,a.data_root,False)
-
     if not a.link_only:
+        required=[scene_dir/"calibration.json",*(scene_dir/"videos"/f"Camera_{c:04d}.mp4" for c in a.cameras)]
+        missing=[path for path in required if not path.exists()]
+        if missing and a.no_download:
+            raise FileNotFoundError(f"Missing inputs: {missing}")
+        if missing:
+            download(a.split,a.scene,a.cameras,a.data_root,False)
         run(scene_dir,out,a.model,"osnet",None,a.device,a.max_frames,1,
             a.sample_every,a.imgsz,a.conf,cameras=a.cameras)
 
-    tracklets=load_tracklets(out/"local_tracklets.json")
     cfg=Config(appearance_weight=0.95,spatial_weight=0.0 if not a.geometry else 0.20,
                temporal_weight=0.05,max_cost=a.max_cost,
                min_similarity=a.min_similarity,use_geometry=a.geometry)
-    mapping,edges=associate(tracklets,cfg)
-    save_mapping(mapping,out/"global_ids.json")
-    predictions,_=export_predictions(out/"observations.csv",out/"global_ids.json",out)
-    render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
+    tracklets,mapping,edges,predictions,_=link_run(out,cfg,expected_detector=a.model)
+    if not a.link_only:
+        render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
     cross=sum(len({c for c,l in mapping if mapping[(c,l)]==gid})>1
               for gid in set(mapping.values()))
     print(f"DONE: {len(tracklets)} local tracks, {len(edges)} accepted edges, "
           f"{cross} cross-camera global IDs")
-    print("Video:",out/"mosaic.mp4")
+    if not a.link_only:
+        print("Video:",out/"mosaic.mp4")
 
 
 if __name__=="__main__":

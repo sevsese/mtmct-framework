@@ -15,6 +15,7 @@ import numpy as np
 from .geometry import calibration_maps, camera_number, project_pixel
 from .reid import ReID, normalized
 from .export import FIELDS
+from .cache import write_manifest
 
 
 def run(scene_dir: Path, output: Path, model_name: str,
@@ -137,12 +138,11 @@ def run(scene_dir: Path, output: Path, model_name: str,
             performance.append(summaries_stats)
             for lid,track in by_id.items():
                 emb=track["embedding_sum"]
-                if emb is None:continue  # no usable feature for this tracklet
                 summaries.append({"camera_id":cam,"local_id":lid,
                                   "start_frame":int(track["start_frame"]),
                                   "end_frame":int(track["end_frame"]),
                                   "positions":track["positions"],
-                                  "embedding":normalized(emb).tolist(),
+                                  "embedding":normalized(emb).tolist() if emb is not None else [],
                                   "samples":track["samples"]})
             del model
             if device.startswith("cuda"):
@@ -152,6 +152,19 @@ def run(scene_dir: Path, output: Path, model_name: str,
         json.dump(summaries,f)
     with open(output/"performance.json","w",encoding="utf-8") as f:
         json.dump(performance,f,indent=2)
+    dimensions={len(row["embedding"]) for row in summaries if row["embedding"]}
+    if len(dimensions)>1:
+        raise ValueError(f"Inconsistent ReID feature dimensions: {sorted(dimensions)}")
+    write_manifest(
+        output, scene=scene_dir.name,
+        cameras=[camera_number(path.stem) for path in videos],
+        inputs=[scene_dir/"calibration.json", *videos],
+        detector=model_name, reid=reid_weights or reid_method,
+        feature_dimension=next(iter(dimensions), None),
+        config={"max_frames":max_frames,"stride":stride,"sample_every":sample_every,
+                "imgsz":imgsz,"conf":conf,"reid_method":reid_method,
+                "reid_model":reid_model},
+    )
     print(f"Wrote {len(summaries)} tracklets to {output/'local_tracklets.json'}")
 
 

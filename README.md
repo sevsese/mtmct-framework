@@ -57,6 +57,10 @@ python -m mtmct --cameras 3 15 --max-frames 900 --conf 0.10 --min-similarity 0.8
 python -m mtmct --link-only --no-download --min-similarity 0.85
 ```
 
+В `--link-only` видео, CUDA и визуализация не нужны. Новые прогоны содержат
+`manifest.json`; несовместимая модель, изменённый вход или размер embedding
+вызывают понятную ошибку вместо тихого использования устаревшего кэша.
+
 ## Результаты
 
 В каталоге запуска создаются:
@@ -68,6 +72,8 @@ python -m mtmct --link-only --no-download --min-similarity 0.85
 | `global_ids.json` | `(camera_id, local_id) -> global_id` |
 | `global_tracks_2d.csv` | обнаружения с Global ID |
 | `performance.json` | FPS и пиковая CUDA-память |
+| `manifest.json` | git SHA, модели, конфигурация и хэши входов |
+| `association_edges.json` | рассмотренные matcher-рёбра и их стоимость |
 | `mosaic.mp4` | синхронная визуализация камер |
 | `track1_person_approx.txt` | демонстрационный приближённый 3D-экспорт |
 

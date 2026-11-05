@@ -111,5 +111,40 @@
 
 Следующий этап: **03 — manifest, независимый кэш и честный offline link-only**.
 
-Коммит: `test: validate global identity metrics` (этот коммит).
+Коммит: `965bcde test: validate global identity metrics`.
+
+## Этап 03 — manifest, кэш и offline link-only
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. Новый GPU tracking-run сохраняет `manifest.json` с git SHA, моделями, конфигурацией, feature dimension и SHA-256 входов.
+2. Link-only не проверяет MP4, не импортирует CUDA-модели и не запускает visualizer.
+3. Изменённый вход, detector или размер embedding отклоняют устаревший кэш.
+4. Tracklet без ReID сохраняется и получает отдельный Global ID вместо удаления.
+5. Несколько matcher-запусков с разными порогами используют неизменный feature cache.
+
+Изменённые файлы: `mtmct/cache.py`, `mtmct/link.py`, `mtmct/tracking.py`,
+`mtmct/__main__.py`, `tests/test_cache_pipeline.py`, `README.md`,
+`docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+| Проверка | Результат |
+|---|---|
+| cache/link-only tests | PASS: 3 passed |
+| полный pytest | PASS: 25 passed in 5.39 s |
+| real cached tracklets, threshold 0.80 | PASS: 62 candidate edges, 17 cross-camera Global ID |
+| те же tracklets, threshold 0.85 | PASS: 35 candidate edges, 16 cross-camera Global ID |
+| SHA-256 `local_tracklets.json` между запусками | неизменён |
+
+Артефакт: `runs/stage03_link_only_real/` содержит повторно построенные
+`global_ids.json`, `association_edges.json`, 2D CSV и TXT. MP4 и GPU не использовались.
+
+Ограничения: старые runs без manifest продолжают работать с явным warning, но
+их provenance нельзя проверить. Отсутствующий исходный файл допустим для offline
+link-only; если файл доступен, его SHA-256 обязательно сверяется.
+
+Следующий этап: **04 — воспроизводимый GPU baseline и Oracle Tracklets**.
+
+Коммит: `feat: decouple association and cache` (этот коммит).
 
