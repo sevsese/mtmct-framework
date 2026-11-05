@@ -37,6 +37,12 @@ python -m pytest -q
 
 ## Настройка запуска
 
+На текущем компьютере сначала активируй рабочее CUDA-окружение:
+
+```bat
+conda activate neuro_clean
+```
+
 ```bat
 python -m mtmct --cameras 3 15 --max-frames 900 --conf 0.10 --min-similarity 0.80 --max-cost 0.125
 ```
@@ -114,6 +120,19 @@ baseline остаётся default, потому что текущий graph A/B 
 подтверждает или отклоняет provisional merges и пишет `identity_correction.json`.
 Исходные observations и Local ID при этом не изменяются.
 
+WILDTRACK оценивается отдельным адаптером строго на размеченных моментах 2 FPS,
+без интерполяции и без обязательной calibration/map:
+
+```bat
+python -m mtmct.wildtrack inspect --root data/WILDTRACK --out runs/wildtrack_inspect.json
+python -m mtmct.wildtrack evaluate --root data/WILDTRACK --pred runs/wildtrack/global_tracks_2d.csv --cameras 0 1 2 --out runs/wildtrack/metrics_3cam.json
+python -m mtmct.wildtrack evaluate --root data/WILDTRACK --pred runs/wildtrack/global_tracks_2d.csv --cameras 0 1 2 3 4 5 6 --out runs/wildtrack/metrics_7cam.json
+```
+
+Поле `frame_id` в prediction CSV должно совпадать с числом в имени annotation
+JSON. Протокол `wildtrack-annotated-2fps-idf1-v1` — внутренняя bbox-метрика,
+не официальная метрика WILDTRACK.
+
 ## Диагностика
 
 ```bat
@@ -149,5 +168,6 @@ python -m mtmct.download --split val --scene Warehouse_022 --ground-truth --no-v
 | `mtmct/visualize.py` | итоговый MP4 mosaic |
 | `mtmct/audit_gt.py` | проверка пересечения камер по train GT |
 | `mtmct/evaluate.py` | приблизительная 2D-оценка |
+| `mtmct/wildtrack.py` | WILDTRACK adapter и bbox-IDF1 на annotated moments |
 
 Данные NVIDIA: https://huggingface.co/datasets/nvidia/PhysicalAI-SmartSpaces

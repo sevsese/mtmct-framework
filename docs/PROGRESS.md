@@ -416,5 +416,53 @@ rejected. На этом run correction корректно является no-op
 
 Следующий этап: **11 — WILDTRACK adapter и portability без обязательной geometry**.
 
-Коммит: `feat: validate and correct identities` (этот коммит).
+Коммит: `20d3081 feat: validate and correct identities`.
+
+## Этап 11 — WILDTRACK portability
+
+Статус: **PASS (adapter/unit); REAL DATA NOT RUN**
+
+Проверяемые результаты:
+
+1. Adapter читает только `annotation_positions/*.json` и не интерполирует кадры.
+2. Время строится по порядку annotated moments с частотой 2 FPS; raw frame из имени JSON сохраняется отдельно.
+3. Невидимые bbox с отрицательными координатами отбрасываются.
+4. Один custom bbox-IDF1 protocol работает для 3 и 7 камер без calibration/map.
+5. Отчёт явно помечен как неофициальная метрика WILDTRACK.
+
+Изменённые файлы: `mtmct/wildtrack.py`, `tests/test_wildtrack.py`, `README.md`,
+`docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+Проверки в `neuro_clean` (PyTorch 2.11.0+cu126, CUDA available): WILDTRACK
+targeted — **2 passed**, полный pytest — **43 passed**. Синтетические perfect predictions
+дают Global IDF1 1.0 и Pairwise F1 1.0 для 3 и 7 камер.
+
+Real WILDTRACK 3/7-camera и geometry A/B: **NOT RUN — dataset отсутствует
+локально**. Adapter не требует geometry, поэтому отсутствие calibration/map не
+блокирует bbox evaluation.
+
+Следующий шаг: повторить команды из README после размещения WILDTRACK в
+`data/WILDTRACK`; результаты инференса останутся вне Git.
+
+Коммит: `test: validate multi-dataset portability` (этот коммит).
+
+## Итог экспериментов V0–V6
+
+Все строки ниже получены на доступном NVIDIA Warehouse_000, камеры 3/15,
+900 кадров. V0 использует старый несовместимый diagnostic protocol и приведён
+только как историческая точка; V1–V6 используют `global-2d-idf1-v1`.
+
+| Run | Изменение | Global IDF1 | Pairwise F1 | Решение |
+|---|---|---:|---:|---|
+| V0 | legacy diagnostic baseline | 0.3759 | — | не сравнивать напрямую |
+| V1 | full baseline | **0.397140** | **0.885740** | default |
+| V2 | Oracle GT bbox + real OSNet | 0.938891 | 0.914875 | diagnostic upper bound |
+| V3 | constrained graph | 0.351803 | 0.796779 | OFF |
+| V4 | graph + memory | 0.377167 | 0.858433 | OFF |
+| V5 | graph + generic time | 0.351803 | 0.796779 | OFF |
+| V6 | graph + identity correction | 0.351803 | 0.796779 | OFF |
+
+Ни одна экспериментальная стадия не превзошла V1, поэтому production default
+не изменён. Главный измеренный резерв — local detection/tracking: Oracle V2
+поднимает IDF1 до 0.938891.
 
