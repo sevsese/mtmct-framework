@@ -33,5 +33,41 @@
 
 Следующий этап: **01 — NVIDIA adapter, валидатор GT и `inspect-scene`**.
 
-Коммит: `docs: audit current pipeline` (этот коммит).
+Коммит: `b8d9e71 docs: audit current pipeline`.
+
+## Этап 01 — NVIDIA adapter и инспектор сцены
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. GT читается потоково, строковые номера кадров преобразуются явно, Person и bbox валидируются.
+2. Формула времени поддерживает FPS, frame offset, time offset и точные PTS.
+3. `python -m mtmct inspect-scene` создаёт `scene_report.json` и `camera_pair_report.csv` без публикации GT identity.
+4. GT+калибровка скачиваются отдельно через `snapshot_download(allow_patterns=...)`, без видео.
+5. Инспектор проверен на настоящих `Warehouse_000` и `Warehouse_022`.
+
+Изменённые файлы: `mtmct/nvidia.py`, `mtmct/download.py`, `mtmct/__main__.py`,
+`tests/test_scene_adapter.py`, `README.md`, `docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+Результаты:
+
+| Проверка | Результат |
+|---|---|
+| targeted scene-adapter tests | PASS: 5 passed |
+| `Warehouse_000` | PASS: 9000 кадров, 60 людей, 19 камер; лучшая пара 3/15 |
+| `Warehouse_022` | PASS: 9270 кадров, 24 человека, 4 камеры; лучшая пара 0/1 |
+| GT validation | 66 961 / 564 вырожденных bbox соответственно; явно отражены и пропущены |
+| video validation | Warehouse_000: локально 4/19 MP4; Warehouse_022: видео не скачивались |
+
+Артефакты: `runs/stage01_warehouse000/{scene_report.json,camera_pair_report.csv}`
+и аналогичный каталог `stage01_warehouse022`. Они локальные и не добавляются в Git.
+
+Ограничения: точные PTS и camera offsets в NVIDIA GT отсутствуют, поэтому отчёты
+используют явно записанное допущение 30 FPS и нулевой offset. GT ID применяются
+только внутри analysis adapter для подсчёта агрегатов и не импортируются inference-кодом.
+
+Следующий этап: **02 — версионированный Global 2D IDF1 и oracle-тесты**.
+
+Коммит: `feat: inspect NVIDIA scenes` (этот коммит).
 

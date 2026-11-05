@@ -77,9 +77,16 @@ python -m mtmct --link-only --no-download --min-similarity 0.85
 
 ```bat
 python -m pytest -q
+python -m mtmct inspect-scene --scene-dir data/MTMC_Tracking_2026/train/Warehouse_000 --out runs/inspect_warehouse_000
 python -m mtmct.audit_gt --gt data/MTMC_Tracking_2026/train/Warehouse_000/ground_truth.json --cameras 3 15 --max-frames 900
 python -m mtmct.evaluate --pred runs/warehouse_000_cam3_15/global_tracks_2d.csv --gt data/MTMC_Tracking_2026/train/Warehouse_000/ground_truth.json --cameras 3 15 --max-frames 900 --stride 1
 python -m mtmct.validate_geometry --scene-dir data/MTMC_Tracking_2026/train/Warehouse_000 --max-frames 100
+```
+
+Чтобы скачать только GT и калибровку без тяжёлых видео:
+
+```bat
+python -m mtmct.download --split val --scene Warehouse_022 --ground-truth --no-videos
 ```
 
 `evaluate` считает только приблизительную 2D IDF1 для разработки, не официальный 3D HOTA.

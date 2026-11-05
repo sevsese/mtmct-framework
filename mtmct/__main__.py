@@ -1,6 +1,7 @@
 """One-command MTMCT pipeline for the validated Warehouse_000 camera pair."""
 from __future__ import annotations
 import argparse
+import sys
 from pathlib import Path
 
 from .association import Config, associate, load_tracklets, save_mapping
@@ -11,6 +12,10 @@ from .visualize import render
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "inspect-scene":
+        from .nvidia import main as inspect_main
+        inspect_main(sys.argv[2:])
+        return
     p=argparse.ArgumentParser(description="Download, track, associate and render MTMCT")
     p.add_argument("--split",choices=["train","val","test"],default="train")
     p.add_argument("--scene",default="Warehouse_000")
