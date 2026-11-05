@@ -5,11 +5,13 @@ from pathlib import Path
 from .association import Config, associate, associate_graph, load_tracklets, save_mapping
 from .export import export_predictions
 from .cache import validate_cache
+from .memory import apply_memory
 
 
 def run(run_dir: Path, cfg: Config, scene_id: int = 0,
         expected_detector: str | None = None, matcher: str = "baseline",
-        allow_same_camera_fragments: bool = False):
+        allow_same_camera_fragments: bool = False, memory: bool = False,
+        memory_similarity: float = 0.9):
     manifest = validate_cache(run_dir, expected_detector)
     if manifest.get("legacy"):
         print("WARNING:", manifest["warning"])
@@ -20,6 +22,12 @@ def run(run_dir: Path, cfg: Config, scene_id: int = 0,
         mapping,edges=associate(tracklets,cfg)
     else:
         raise ValueError("matcher must be baseline or graph")
+    if memory:
+        mapping,records,memory_decisions=apply_memory(
+            tracklets,mapping,similarity_threshold=memory_similarity)
+        (run_dir/"global_memory.json").write_text(
+            __import__("json").dumps({"groups":records,"decisions":memory_decisions},indent=2),
+            encoding="utf-8")
     save_mapping(mapping,run_dir/"global_ids.json")
     (run_dir/"association_edges.json").write_text(
         __import__("json").dumps(edges, indent=2), encoding="utf-8")
@@ -49,6 +57,8 @@ def main():
     p.add_argument("--matcher",choices=["baseline","graph"],default="baseline")
     p.add_argument("--allow-same-camera-fragments",action="store_true")
     p.add_argument("--time",action="store_true",help="Enable time constraints for graph matcher")
+    p.add_argument("--memory",action="store_true",help="Enable offline prototype memory")
+    p.add_argument("--memory-similarity",type=float,default=0.90)
     a=p.parse_args()
     cfg=Config(max_cost=a.max_cost,min_similarity=a.min_similarity,max_gap_seconds=a.max_gap,
                max_speed_mps=a.max_speed,overlap_distance_m=a.max_overlap_distance,
@@ -60,7 +70,8 @@ def main():
     if a.matcher=="graph" and not a.time:
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,out_csv,out_txt=run(
-        a.run_dir,cfg,a.scene_id,a.model,a.matcher,a.allow_same_camera_fragments)
+        a.run_dir,cfg,a.scene_id,a.model,a.matcher,a.allow_same_camera_fragments,
+        a.memory,a.memory_similarity)
     accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher=="graph" else len(edges)
     print(f"Local tracklets: {len(tracklets)}, accepted edges: {accepted}, global IDs: {len(set(mapping.values()))}")
     print("Results:", out_csv, out_txt)

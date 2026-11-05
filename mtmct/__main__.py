@@ -34,6 +34,8 @@ def main():
     p.add_argument("--geometry",action="store_true",help="Use validated floor geometry")
     p.add_argument("--time",action="store_true",help="Enable time constraints for graph matcher")
     p.add_argument("--matcher",choices=["baseline","graph"],default="baseline")
+    p.add_argument("--memory",action="store_true")
+    p.add_argument("--memory-similarity",type=float,default=0.90)
     p.add_argument("--link-only",action="store_true",help="Reuse existing local_tracklets.json")
     p.add_argument("--no-download",action="store_true")
     p.add_argument("--scale",type=float,default=0.45)
@@ -60,7 +62,8 @@ def main():
     if a.matcher=="graph" and not a.time:
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,predictions,_=link_run(
-        out,cfg,expected_detector=a.model,matcher=a.matcher)
+        out,cfg,expected_detector=a.model,matcher=a.matcher,
+        memory=a.memory,memory_similarity=a.memory_similarity)
     if not a.link_only:
         render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
     cross=sum(len({c for c,l in mapping if mapping[(c,l)]==gid})>1

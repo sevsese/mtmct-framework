@@ -310,5 +310,39 @@ Graph принял 19 и отклонил 2396 рёбер. Измеренный 
 
 Следующий этап: **08 — offline Global Memory для long-gap association**.
 
-Коммит: `feat: constrain global graph association` (этот коммит).
+Коммит: `529e9d6 feat: constrain global graph association`.
+
+## Этап 08 — Offline Global Memory
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. Memory хранит до трёх нормализованных прототипов, camera/frame history и confirmed status.
+2. Long-gap synthetic восстанавливает один Global ID после отказа временного matcher.
+3. Одновременные tracklet одной камеры не объединяются даже при одинаковом appearance.
+4. Memory OFF не меняет graph mapping и остаётся default.
+5. Memory обновляет только группы с доступными ReID-прототипами; TTL/LRU не добавлены для offline режима.
+
+Изменённые файлы: `mtmct/memory.py`, `mtmct/link.py`, `mtmct/__main__.py`,
+`tests/test_memory.py`, `README.md`, `docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+Проверки: memory unit tests — 2 passed; полный pytest — **36 passed**.
+
+A/B на одном graph cache, камеры 3/15, 900 кадров:
+
+| Режим | Global IDF1 | Pairwise F1 | Groups |
+|---|---:|---:|---:|
+| graph, memory OFF | 0.351803 | 0.796779 | 51 |
+| graph, memory ON | **0.377167** | **0.858433** | 48 |
+| baseline reference | **0.397140** | **0.885740** | — |
+
+Memory подтвердил 3 merge и отклонил 2 temporal conflict. Он улучшил graph,
+но не превзошёл baseline, поэтому остаётся экспериментальным **OFF**.
+
+Артефакт: `runs/v2_graph_memory_cam3_15/global_memory.json` и metrics.
+
+Следующий этап: **09 — camera time offsets и optional topology**.
+
+Коммит: `feat: add global memory` (этот коммит).
 

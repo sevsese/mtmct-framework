@@ -101,6 +101,10 @@ Tracklet refinement запускается отдельно через `python -
 полный `association_edges.json` с `accepted/rejected` и причиной решения;
 baseline остаётся default, потому что текущий graph A/B потерял recall.
 
+Опциональная offline-память включается `--memory`: она хранит несколько
+прототипов и историю камер/кадров подтверждённых групп. По умолчанию OFF;
+на текущем A/B она улучшила graph, но не превзошла baseline.
+
 ## Диагностика
 
 ```bat

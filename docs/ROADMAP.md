@@ -13,8 +13,8 @@ merge выполняются только после отдельного раз
 | 05 | Диагностика и агрегация ReID | выполнен локально |
 | 06 | Tracklet refinement с provenance | выполнен локально |
 | 07 | Constrained graph association и журнал решений | выполнен локально |
-| 08 | Offline Global Memory | следующий |
-| 09 | Время, offsets и опциональная топология | ожидает |
+| 08 | Offline Global Memory | выполнен локально |
+| 09 | Время, offsets и опциональная топология | следующий |
 | 10 | Обратимые association и identity correction | ожидает |
 | 11 | WILDTRACK и проверка переносимости | ожидает |
 
