@@ -200,6 +200,15 @@ def main():
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text, encoding="utf-8")
+        with (args.out.parent / "errors.csv").open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["error_type", "count"])
+            writer.writerows([
+                ["identity_false_positive", result["global"]["IDFP"]],
+                ["identity_false_negative", result["global"]["IDFN"]],
+                ["detection_false_positive", result["detection"]["FP"]],
+                ["detection_false_negative", result["detection"]["FN"]],
+            ])
 
 
 if __name__ == "__main__":

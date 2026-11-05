@@ -146,5 +146,62 @@ link-only; если файл доступен, его SHA-256 обязатель
 
 Следующий этап: **04 — воспроизводимый GPU baseline и Oracle Tracklets**.
 
-Коммит: `feat: decouple association and cache` (этот коммит).
+Коммит: `66815ae feat: decouple association and cache`.
+
+## Этап 04 — GPU baseline и Oracle Tracklets
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. Полный YOLO + ByteTrack + OSNet pipeline повторно выполнен на GPU с manifest и замороженной конфигурацией.
+2. Повторный baseline 3/15 воспроизвёл прежние IDTP/IDFP/IDFN точно.
+3. Выполнен расширенный четырёхкамерный GPU smoke на камерах 0/1/3/15.
+4. Oracle Tracklets используют GT только как bbox, перенумеровывают Local ID отдельно по камерам и извлекают настоящий OSNet из видео.
+5. Для full и oracle сохранены config, manifest, metrics, errors, association edges и mosaic.
+
+Изменённые файлы: `mtmct/oracle.py`, `mtmct/cache.py`, `mtmct/__main__.py`,
+`mtmct/evaluate.py`, `tests/test_oracle_tracklets.py`, `README.md`,
+`docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+Проверки:
+
+| Проверка | Результат |
+|---|---|
+| oracle leakage unit test | PASS: 1 passed |
+| полный pytest | PASS: 26 passed in 8.21 s |
+| CUDA math | PASS |
+| full baseline, cameras 3/15, 900 frames | PASS |
+| expanded full baseline, cameras 0/1/3/15, 300 frames | PASS |
+| Oracle Tracklets, cameras 3/15, 900 frames | PASS |
+
+Сравнение на одинаковых камерах 3/15 и кадрах 0..899:
+
+| Режим | Global IDF1 | IDP | IDR | Pairwise F1 | Detection F1 |
+|---|---:|---:|---:|---:|---:|
+| Full pipeline | 0.397140 | 0.851874 | 0.258925 | 0.885740 | 0.457684 |
+| Oracle GT bbox + real OSNet | 0.938891 | 0.951042 | 0.927047 | 0.914875 | 0.987224 |
+
+Full pipeline runtime: camera 3 — 24.39 FPS, camera 15 — 26.01 FPS; peak
+CUDA tensor memory 0.25 GiB на каждой. Oracle feature extraction: 97.24/106.02 FPS.
+
+Расширенный smoke 0/1/3/15, 300 кадров: Global IDF1 `0.517268`, Pairwise
+F1 `0.825221`, Detection F1 `0.594132`; FPS по камерам 12.62/13.31/12.76/18.85.
+
+Артефакты:
+
+- `runs/v2_baseline_cam3_15/`;
+- `runs/v2_baseline_cam0_1_3_15_300/`;
+- `runs/v2_oracle_tracklets_cam3_15/`.
+
+Вывод: крупнейший подтверждённый разрыв находится в detection/local tracking
+(IDR 0.258925 против 0.927047 у Oracle), а не только в global association.
+
+Ограничения: Holdout `Warehouse_022` не запускался через модели, потому что его
+видео не скачивались и гиперпараметры на val не подбираются. Oracle — диагностика,
+не честный inference benchmark и не официальный NVIDIA 3D HOTA.
+
+Следующий этап: **05 — диагностика ReID и quality-aware aggregation на неизменном кэше**.
+
+Коммит: `test: establish MTMCT baselines` (этот коммит).
 

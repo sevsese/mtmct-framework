@@ -9,6 +9,14 @@ from pathlib import Path
 SCHEMA_VERSION = "mtmct-cache-v1"
 
 
+def write_config(run_dir: str | Path, config: dict) -> Path:
+    """JSON is valid YAML 1.2 and keeps this dependency-free."""
+    path = Path(run_dir) / "config.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    return path
+
+
 def fingerprint(path: str | Path) -> dict:
     path = Path(path)
     digest = hashlib.sha256()

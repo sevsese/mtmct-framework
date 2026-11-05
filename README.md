@@ -79,6 +79,16 @@ python -m mtmct --link-only --no-download --min-similarity 0.85
 
 `track1_person_approx.txt` не является полноценным конкурсным 3D-решением. Официальная метрика Track 1 — 3D HOTA.
 
+Для диагностики верхней границы local tracking можно построить Oracle Tracklets:
+
+```bat
+python -m mtmct.oracle --scene-dir data/MTMC_Tracking_2026/train/Warehouse_000 --out runs/oracle --cameras 3 15 --max-frames 900 --device cuda:0 --reid osnet
+python -m mtmct.link --run-dir runs/oracle --model oracle_gt_boxes --ignore-geometry --spatial-weight 0 --appearance-weight 0.95 --temporal-weight 0.05
+```
+
+Здесь GT предоставляет только bbox. Local ID перенумеровываются независимо по
+камерам, OSNet извлекается из настоящих видеокропов, а matcher не получает GT identity.
+
 ## Диагностика
 
 ```bat

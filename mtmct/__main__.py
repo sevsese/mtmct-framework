@@ -7,6 +7,7 @@ from pathlib import Path
 from .association import Config
 from .download import download
 from .link import run as link_run
+from .cache import write_config
 from .tracking import run
 from .visualize import render
 
@@ -38,6 +39,7 @@ def main():
 
     tag="_".join(map(str,a.cameras))
     out=a.out or Path("runs")/f"{a.scene.lower()}_cam{tag}"
+    write_config(out, vars(a) | {"data_root": str(a.data_root), "out": str(out)})
     scene_dir=a.data_root/"MTMC_Tracking_2026"/a.split/a.scene
     if not a.link_only:
         required=[scene_dir/"calibration.json",*(scene_dir/"videos"/f"Camera_{c:04d}.mp4" for c in a.cameras)]

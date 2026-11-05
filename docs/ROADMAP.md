@@ -9,8 +9,8 @@ merge выполняются только после отдельного раз
 | 01 | NVIDIA adapter, валидация и `inspect-scene` | выполнен локально |
 | 02 | Версионированный Global 2D IDF1 и oracle-тесты | выполнен локально |
 | 03 | Manifest, независимые стадии и честный offline link-only | выполнен локально |
-| 04 | Воспроизводимый full baseline и Oracle Tracklets | следующий |
-| 05 | Диагностика и агрегация ReID | ожидает |
+| 04 | Воспроизводимый full baseline и Oracle Tracklets | выполнен локально |
+| 05 | Диагностика и агрегация ReID | следующий |
 | 06 | Tracklet refinement с provenance | ожидает |
 | 07 | Constrained graph association и журнал решений | ожидает |
 | 08 | Offline Global Memory | ожидает |
