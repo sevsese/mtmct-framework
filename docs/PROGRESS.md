@@ -276,5 +276,39 @@ Split на реальном старом cache не оценивался: вре
 
 Следующий этап: **07 — constrained graph association и полный журнал решений**.
 
-Коммит: `feat: refine tracklets` (этот коммит).
+Коммит: `d34e945 feat: refine tracklets`.
+
+## Этап 07 — Constrained Graph Association
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. Существующий matcher сохранён как `baseline`; новый выбирается только `--matcher graph`.
+2. Graph рассматривает cross-camera candidates, сохраняет singleton без ReID и проверяет все пары компонентов перед merge.
+3. Одновременные разные tracklet одной камеры не попадают в один Global ID.
+4. Одновременное появление на разных камерах разрешено без geometry/time.
+5. Все пары получают decision, score breakdown и reason в `association_edges.json`.
+
+Изменённые файлы: `mtmct/association.py`, `mtmct/link.py`, `mtmct/__main__.py`,
+`tests/test_association_constraints.py`, `README.md`, `docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+Проверки: targeted association/baseline — 14 passed; полный pytest — **34 passed**.
+
+A/B использует один `v2_baseline_cam3_15` feature cache, камеры 3/15, 900 кадров:
+
+| Matcher | Global IDF1 | Pairwise P | Pairwise F1 | Global groups |
+|---|---:|---:|---:|---:|
+| baseline | **0.397140** | 0.999718 | **0.885740** | 17 cross-camera |
+| constrained graph, appearance-only | 0.351803 | **1.000000** | 0.796779 | 51 total |
+
+Graph принял 19 и отклонил 2396 рёбер. Измеренный pairwise false-merge rate
+`1 - precision` равен 0, но recall/IDF1 хуже. Поэтому graph остаётся
+экспериментальным **OFF**, baseline — default.
+
+Артефакт: `runs/v2_graph_cam3_15/` с полным decision journal и metrics.
+
+Следующий этап: **08 — offline Global Memory для long-gap association**.
+
+Коммит: `feat: constrain global graph association` (этот коммит).
 

@@ -12,8 +12,8 @@ merge выполняются только после отдельного раз
 | 04 | Воспроизводимый full baseline и Oracle Tracklets | выполнен локально |
 | 05 | Диагностика и агрегация ReID | выполнен локально |
 | 06 | Tracklet refinement с provenance | выполнен локально |
-| 07 | Constrained graph association и журнал решений | следующий |
-| 08 | Offline Global Memory | ожидает |
+| 07 | Constrained graph association и журнал решений | выполнен локально |
+| 08 | Offline Global Memory | следующий |
 | 09 | Время, offsets и опциональная топология | ожидает |
 | 10 | Обратимые association и identity correction | ожидает |
 | 11 | WILDTRACK и проверка переносимости | ожидает |

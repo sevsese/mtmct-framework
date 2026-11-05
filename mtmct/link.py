@@ -2,18 +2,24 @@
 from __future__ import annotations
 import argparse
 from pathlib import Path
-from .association import Config, associate, load_tracklets, save_mapping
+from .association import Config, associate, associate_graph, load_tracklets, save_mapping
 from .export import export_predictions
 from .cache import validate_cache
 
 
 def run(run_dir: Path, cfg: Config, scene_id: int = 0,
-        expected_detector: str | None = None):
+        expected_detector: str | None = None, matcher: str = "baseline",
+        allow_same_camera_fragments: bool = False):
     manifest = validate_cache(run_dir, expected_detector)
     if manifest.get("legacy"):
         print("WARNING:", manifest["warning"])
     tracklets=load_tracklets(run_dir/"local_tracklets.json")
-    mapping,edges=associate(tracklets,cfg)
+    if matcher == "graph":
+        mapping,edges=associate_graph(tracklets,cfg,allow_same_camera_fragments)
+    elif matcher == "baseline":
+        mapping,edges=associate(tracklets,cfg)
+    else:
+        raise ValueError("matcher must be baseline or graph")
     save_mapping(mapping,run_dir/"global_ids.json")
     (run_dir/"association_edges.json").write_text(
         __import__("json").dumps(edges, indent=2), encoding="utf-8")
@@ -40,15 +46,23 @@ def main():
     p.add_argument("--ignore-geometry",action="store_true",
                    help="Ignore projected positions until calibration has been validated")
     p.add_argument("--model",default=None,help="Reject cache created with another detector")
+    p.add_argument("--matcher",choices=["baseline","graph"],default="baseline")
+    p.add_argument("--allow-same-camera-fragments",action="store_true")
+    p.add_argument("--time",action="store_true",help="Enable time constraints for graph matcher")
     a=p.parse_args()
     cfg=Config(max_cost=a.max_cost,min_similarity=a.min_similarity,max_gap_seconds=a.max_gap,
                max_speed_mps=a.max_speed,overlap_distance_m=a.max_overlap_distance,
                appearance_weight=a.appearance_weight,spatial_weight=a.spatial_weight,
                temporal_weight=a.temporal_weight,fps=a.fps,
                require_geometry=a.require_geometry,
-               use_geometry=not a.ignore_geometry)
-    tracklets,mapping,edges,out_csv,out_txt=run(a.run_dir,cfg,a.scene_id,a.model)
-    print(f"Local tracklets: {len(tracklets)}, candidate edges: {len(edges)}, global IDs: {len(set(mapping.values()))}")
+               use_geometry=not a.ignore_geometry,
+               use_time=True if a.matcher=="baseline" else a.time)
+    if a.matcher=="graph" and not a.time:
+        cfg.temporal_weight=0.0
+    tracklets,mapping,edges,out_csv,out_txt=run(
+        a.run_dir,cfg,a.scene_id,a.model,a.matcher,a.allow_same_camera_fragments)
+    accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher=="graph" else len(edges)
+    print(f"Local tracklets: {len(tracklets)}, accepted edges: {accepted}, global IDs: {len(set(mapping.values()))}")
     print("Results:", out_csv, out_txt)
     print("NOTE: person-only approximate 3D boxes are NOT a competitive full Track-1 solution.")
 

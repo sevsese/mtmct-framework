@@ -26,6 +26,7 @@ class Config:
     fps: float = 30.0
     require_geometry: bool = False
     use_geometry: bool = True
+    use_time: bool = True
 
 
 def unit(v: list[float] | np.ndarray) -> np.ndarray:
@@ -45,6 +46,8 @@ def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, floa
     overlapping = max(start_a, start_b) <= min(end_a, end_b)
     if overlapping and int(a["camera_id"]) == int(b["camera_id"]):
         return False, 1., 1.
+    if not cfg.use_geometry and not cfg.use_time:
+        return True, 0.0, 0.0
     pa, pb = frames(a), frames(b)
     if not cfg.use_geometry:
         if overlapping:
@@ -91,21 +94,102 @@ def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, floa
 
 def pair_cost(a: dict, b: dict, cfg: Config) -> float | None:
     """Lower is better; None means physically impossible."""
+    score = pair_score(a, b, cfg)
+    return None if score["cost"] is None else float(score["cost"])
+
+
+def pair_score(a: dict, b: dict, cfg: Config) -> dict:
+    """Explain a candidate score without exposing any GT information."""
     feasible, spatial, temporal = _space_constraints(a, b, cfg)
     if not feasible:
-        return None
+        return {"cost": None, "similarity": None, "spatial": spatial,
+                "temporal": temporal, "reason": "hard_constraint"}
     v, w = unit(a.get("embedding", [])), unit(b.get("embedding", []))
     if v.size == 0 or w.size == 0 or v.shape != w.shape:
-        return None
+        return {"cost": None, "similarity": None, "spatial": spatial,
+                "temporal": temporal, "reason": "missing_reid"}
     similarity = float(np.clip(v @ w, -1.0, 1.0))
     if similarity < cfg.min_similarity:
-        return None
+        return {"cost": None, "similarity": similarity, "spatial": spatial,
+                "temporal": temporal, "reason": "weak_appearance"}
     # Cosine distance, in [0,2]; normalize to [0,1].
     appearance = (1.0 - similarity) / 2.0
     weights = [cfg.appearance_weight, cfg.spatial_weight, cfg.temporal_weight]
     if min(weights) < 0 or sum(weights) <= 0:
         raise ValueError("weights must be nonnegative and at least one positive")
-    return (weights[0]*appearance + weights[1]*spatial + weights[2]*temporal) / sum(weights)
+    cost = (weights[0]*appearance + weights[1]*spatial + weights[2]*temporal) / sum(weights)
+    return {"cost": float(cost), "similarity": similarity, "spatial": spatial,
+            "temporal": temporal, "reason": "candidate"}
+
+
+def associate_graph(tracklets: list[dict], cfg: Config,
+                    allow_same_camera_fragments: bool = False):
+    """Constrained agglomeration with a decision journal for every pair."""
+    keys = [(int(row["camera_id"]), int(row["local_id"])) for row in tracklets]
+    if len(set(keys)) != len(keys):
+        raise ValueError("duplicate (camera_id, local_id) in tracklets")
+    parent = list(range(len(tracklets)))
+    members = {index: {index} for index in range(len(tracklets))}
+
+    def find(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    journal = []
+    candidates = []
+    for left in range(len(tracklets)):
+        for right in range(left + 1, len(tracklets)):
+            if (tracklets[left]["camera_id"] == tracklets[right]["camera_id"]
+                    and not allow_same_camera_fragments):
+                journal.append({"i": left, "j": right, "decision": "rejected",
+                                "reason": "same_camera_disabled"})
+                continue
+            score = pair_score(tracklets[left], tracklets[right], cfg)
+            edge = {"i": left, "j": right, **score}
+            if score["cost"] is None:
+                edge["decision"] = "rejected"
+                journal.append(edge)
+            elif score["cost"] > cfg.max_cost:
+                edge.update(decision="rejected", reason="max_cost")
+                journal.append(edge)
+            else:
+                candidates.append(edge)
+    candidates.sort(key=lambda edge: edge["cost"])
+    for edge in candidates:
+        left_root, right_root = find(edge["i"]), find(edge["j"])
+        if left_root == right_root:
+            edge.update(decision="rejected", reason="already_connected")
+            journal.append(edge)
+            continue
+        compatible = True
+        for left in members[left_root]:
+            for right in members[right_root]:
+                same_camera = tracklets[left]["camera_id"] == tracklets[right]["camera_id"]
+                if same_camera and not allow_same_camera_fragments:
+                    compatible = False
+                elif not _space_constraints(tracklets[left], tracklets[right], cfg)[0]:
+                    compatible = False
+                if not compatible:
+                    break
+            if not compatible:
+                break
+        if not compatible:
+            edge.update(decision="rejected", reason="component_conflict")
+            journal.append(edge)
+            continue
+        parent[right_root] = left_root
+        members[left_root].update(members.pop(right_root))
+        edge.update(decision="accepted", reason="best_compatible_edge")
+        journal.append(edge)
+    roots = sorted({find(index) for index in range(len(tracklets))}, key=lambda root: (
+        min(int(tracklets[index]["start_frame"]) for index in members[root]),
+        min(keys[index] for index in members[root]),
+    ))
+    global_ids = {root: index + 1 for index, root in enumerate(roots)}
+    mapping = {keys[index]: global_ids[find(index)] for index in range(len(tracklets))}
+    return mapping, journal
 
 
 def associate(tracklets: list[dict], cfg: Config) -> tuple[dict[tuple[int,int], int], list[dict]]:

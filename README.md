@@ -97,6 +97,10 @@ Tracklet refinement запускается отдельно через `python -
 Без `--auto-split/--auto-merge` он только пишет dry-run отчёт; автоматический
 режим по умолчанию выключен, поскольку текущий merge A/B ухудшил IDF1.
 
+Экспериментальный constrained matcher включается `--matcher graph`. Он пишет
+полный `association_edges.json` с `accepted/rejected` и причиной решения;
+baseline остаётся default, потому что текущий graph A/B потерял recall.
+
 ## Диагностика
 
 ```bat

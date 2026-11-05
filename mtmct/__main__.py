@@ -32,6 +32,8 @@ def main():
     p.add_argument("--min-similarity",type=float,default=0.80)
     p.add_argument("--max-cost",type=float,default=0.125)
     p.add_argument("--geometry",action="store_true",help="Use validated floor geometry")
+    p.add_argument("--time",action="store_true",help="Enable time constraints for graph matcher")
+    p.add_argument("--matcher",choices=["baseline","graph"],default="baseline")
     p.add_argument("--link-only",action="store_true",help="Reuse existing local_tracklets.json")
     p.add_argument("--no-download",action="store_true")
     p.add_argument("--scale",type=float,default=0.45)
@@ -53,13 +55,18 @@ def main():
 
     cfg=Config(appearance_weight=0.95,spatial_weight=0.0 if not a.geometry else 0.20,
                temporal_weight=0.05,max_cost=a.max_cost,
-               min_similarity=a.min_similarity,use_geometry=a.geometry)
-    tracklets,mapping,edges,predictions,_=link_run(out,cfg,expected_detector=a.model)
+               min_similarity=a.min_similarity,use_geometry=a.geometry,
+               use_time=True if a.matcher=="baseline" else a.time)
+    if a.matcher=="graph" and not a.time:
+        cfg.temporal_weight=0.0
+    tracklets,mapping,edges,predictions,_=link_run(
+        out,cfg,expected_detector=a.model,matcher=a.matcher)
     if not a.link_only:
         render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
     cross=sum(len({c for c,l in mapping if mapping[(c,l)]==gid})>1
               for gid in set(mapping.values()))
-    print(f"DONE: {len(tracklets)} local tracks, {len(edges)} accepted edges, "
+    accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher=="graph" else len(edges)
+    print(f"DONE: {len(tracklets)} local tracks, {accepted} accepted edges, "
           f"{cross} cross-camera global IDs")
     if not a.link_only:
         print("Video:",out/"mosaic.mp4")
