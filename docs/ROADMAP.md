@@ -7,8 +7,8 @@ merge выполняются только после отдельного раз
 |---|---|---|
 | 00 | Аудит реального pipeline и измеренная отправная точка | выполнен локально |
 | 01 | NVIDIA adapter, валидация и `inspect-scene` | выполнен локально |
-| 02 | Версионированный Global 2D IDF1 и oracle-тесты | следующий |
-| 03 | Manifest, независимые стадии и честный offline link-only | ожидает |
+| 02 | Версионированный Global 2D IDF1 и oracle-тесты | выполнен локально |
+| 03 | Manifest, независимые стадии и честный offline link-only | следующий |
 | 04 | Воспроизводимый full baseline и Oracle Tracklets | ожидает |
 | 05 | Диагностика и агрегация ReID | ожидает |
 | 06 | Tracklet refinement с provenance | ожидает |

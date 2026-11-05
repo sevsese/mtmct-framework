@@ -69,5 +69,47 @@
 
 Следующий этап: **02 — версионированный Global 2D IDF1 и oracle-тесты**.
 
-Коммит: `feat: inspect NVIDIA scenes` (этот коммит).
+Коммит: `543ca7e feat: inspect NVIDIA scenes`.
+
+## Этап 02 — Global 2D IDF1 и oracle-проверки
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. Bbox сопоставляются только внутри одинаковых `(camera, frame)` при IoU ≥ 0.5.
+2. GT ID и predicted Global ID назначаются глобально один-к-одному после bbox matching.
+3. Сохраняются IDTP/IDFP/IDFN, IDP/IDR/IDF1, detection, per-camera IDF1 и cross-camera Pairwise P/R/F1.
+4. Протокол имеет версию `global-2d-idf1-v1` и явно не называется официальной 3D HOTA.
+5. Oracle-тесты подтверждают perfect=1.0 и падение метрик при lost/false detection, ID switch, false merge и false split.
+
+Изменённые файлы: `mtmct/evaluate.py`, `mtmct/nvidia.py`,
+`tests/test_evaluation_oracles.py`, `README.md`, `docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+| Проверка | Результат |
+|---|---|
+| evaluation oracle tests | PASS: 5 passed |
+| полный pytest | PASS: 22 passed in 7.90 s |
+| real-data evaluation, Warehouse_000 cameras 3/15, frames 0..899 | PASS |
+
+Реальный результат существующего `runs/improved_cam3_15`:
+
+| Метрика | Значение |
+|---|---:|
+| Global IDF1 | 0.397140 |
+| Global IDP / IDR | 0.851874 / 0.258925 |
+| IDTP / IDFP / IDFN | 6999 / 1217 / 20032 |
+| Detection P / R / F1 | 0.981743 / 0.298398 / 0.457684 |
+| Pairwise association P / R / F1 | 0.999718 / 0.795092 / 0.885740 |
+
+Артефакт: `runs/stage02_improved_cam3_15/metrics.json` (локальный, не в Git).
+
+Ограничения: per-camera HOTA не вычисляется без TrackEval и записывается как
+`null`; v1 исключает вырожденные GT bbox, поэтому его IDF1 `0.397140` нельзя
+напрямую сравнивать со старым diagnostic IDF1 `0.3759`. По умолчанию evaluator
+теперь проверяет каждый кадр (`stride=1`), старый sampling доступен явно.
+
+Следующий этап: **03 — manifest, независимый кэш и честный offline link-only**.
+
+Коммит: `test: validate global identity metrics` (этот коммит).
 

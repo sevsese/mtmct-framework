@@ -79,7 +79,7 @@ python -m mtmct --link-only --no-download --min-similarity 0.85
 python -m pytest -q
 python -m mtmct inspect-scene --scene-dir data/MTMC_Tracking_2026/train/Warehouse_000 --out runs/inspect_warehouse_000
 python -m mtmct.audit_gt --gt data/MTMC_Tracking_2026/train/Warehouse_000/ground_truth.json --cameras 3 15 --max-frames 900
-python -m mtmct.evaluate --pred runs/warehouse_000_cam3_15/global_tracks_2d.csv --gt data/MTMC_Tracking_2026/train/Warehouse_000/ground_truth.json --cameras 3 15 --max-frames 900 --stride 1
+python -m mtmct.evaluate --pred runs/warehouse_000_cam3_15/global_tracks_2d.csv --gt data/MTMC_Tracking_2026/train/Warehouse_000/ground_truth.json --cameras 3 15 --max-frames 900 --stride 1 --out runs/warehouse_000_cam3_15/metrics.json
 python -m mtmct.validate_geometry --scene-dir data/MTMC_Tracking_2026/train/Warehouse_000 --max-frames 100
 ```
 
@@ -89,9 +89,13 @@ python -m mtmct.validate_geometry --scene-dir data/MTMC_Tracking_2026/train/Ware
 python -m mtmct.download --split val --scene Warehouse_022 --ground-truth --no-videos
 ```
 
-`evaluate` считает только приблизительную 2D IDF1 для разработки, не официальный 3D HOTA.
+`evaluate` считает версионированный custom Global 2D IDF1 по bbox внутри
+`(камера, кадр)`. Это внутренняя метрика разработки, не официальный NVIDIA 3D HOTA.
 
-Проверенный прогон на 900 кадрах улучшил диагностическую IDF1 с `0.3569` до `0.3759`, Pairwise F1 с `0.7692` до `0.8000`, а медианную ошибку геометрии камер 3/15 — примерно с `239/228 м` до `0.19/0.13 м`.
+Существующий прогон на 900 кадрах по новому протоколу
+`global-2d-idf1-v1` даёт Global IDF1 `0.397140`, IDP `0.851874`, IDR
+`0.258925` и Pairwise F1 `0.885740`. Старое значение diagnostic IDF1
+`0.3759` вычислялось другим протоколом и напрямую не сравнивается.
 
 ## Структура кода
 

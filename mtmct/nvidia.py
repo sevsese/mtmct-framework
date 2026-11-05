@@ -94,8 +94,10 @@ class NvidiaDatasetAdapter:
                         errors.append(str(exc))
         return errors
 
-    def observations(self, strict: bool = True):
+    def observations(self, strict: bool = True, max_frames: int | None = None):
         for frame, objects in self.frames():
+            if max_frames is not None and frame >= max_frames:
+                break
             for obj in objects:
                 if str(value(obj, "object_type", "")).lower() not in {"person", "people"}:
                     continue
