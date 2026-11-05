@@ -14,8 +14,8 @@ merge выполняются только после отдельного раз
 | 06 | Tracklet refinement с provenance | выполнен локально |
 | 07 | Constrained graph association и журнал решений | выполнен локально |
 | 08 | Offline Global Memory | выполнен локально |
-| 09 | Время, offsets и опциональная топология | следующий |
-| 10 | Обратимые association и identity correction | ожидает |
+| 09 | Время, offsets и опциональная топология | выполнен локально |
+| 10 | Обратимые association и identity correction | следующий |
 | 11 | WILDTRACK и проверка переносимости | ожидает |
 
 Правила перехода: CPU unit/integration тесты должны быть зелёными; real-data

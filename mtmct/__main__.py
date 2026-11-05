@@ -8,6 +8,7 @@ from .association import Config
 from .download import download
 from .link import run as link_run
 from .cache import write_config
+from .time_sync import CameraTransitionModel, parse_offsets
 from .tracking import run
 from .visualize import render
 
@@ -36,6 +37,8 @@ def main():
     p.add_argument("--matcher",choices=["baseline","graph"],default="baseline")
     p.add_argument("--memory",action="store_true")
     p.add_argument("--memory-similarity",type=float,default=0.90)
+    p.add_argument("--camera-offset",action="append",default=[],metavar="CAMERA=SECONDS")
+    p.add_argument("--topology",type=Path)
     p.add_argument("--link-only",action="store_true",help="Reuse existing local_tracklets.json")
     p.add_argument("--no-download",action="store_true")
     p.add_argument("--scale",type=float,default=0.45)
@@ -58,7 +61,9 @@ def main():
     cfg=Config(appearance_weight=0.95,spatial_weight=0.0 if not a.geometry else 0.20,
                temporal_weight=0.05,max_cost=a.max_cost,
                min_similarity=a.min_similarity,use_geometry=a.geometry,
-               use_time=True if a.matcher=="baseline" else a.time)
+               use_time=True if a.matcher=="baseline" else a.time,
+               camera_offsets_s=parse_offsets(a.camera_offset),
+               transition_model=CameraTransitionModel.from_json(a.topology) if a.topology else None)
     if a.matcher=="graph" and not a.time:
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,predictions,_=link_run(

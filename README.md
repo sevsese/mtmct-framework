@@ -105,6 +105,11 @@ baseline остаётся default, потому что текущий graph A/B 
 прототипов и историю камер/кадров подтверждённых групп. По умолчанию OFF;
 на текущем A/B она улучшила graph, но не превзошла baseline.
 
+Время для graph включается `--time`; offsets задаются повторяемым
+`--camera-offset CAMERA=SECONDS`, измеренная topology — `--topology routes.json`.
+Неизвестный маршрут ничего не запрещает. CITIC world-position оценивается
+отдельной командой `python -m mtmct.citic` и не смешивается с bbox IDF1.
+
 ## Диагностика
 
 ```bat

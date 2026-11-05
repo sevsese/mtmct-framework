@@ -344,5 +344,42 @@ Memory подтвердил 3 merge и отклонил 2 temporal conflict. О�
 
 Следующий этап: **09 — camera time offsets и optional topology**.
 
-Коммит: `feat: add global memory` (этот коммит).
+Коммит: `e2d5e14 feat: add global memory`.
+
+## Этап 09 — время, topology и CITIC protocol
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. Tracklet использует явные `start_s/end_s` либо `frame/fps + camera_offset`.
+2. Unknown topology не запрещает match; forbidden и выход за measured route запрещают.
+3. Измеренный допустимый маршрут добавляет soft temporal penalty.
+4. Time/topology включаются только флагом и не меняют appearance-only default graph.
+5. CITIC world-position evaluator имеет отдельную версию протокола и не называется bbox IDF1.
+
+Изменённые файлы: `mtmct/time_sync.py`, `mtmct/citic.py`,
+`mtmct/association.py`, `mtmct/link.py`, `mtmct/__main__.py`,
+`tests/test_time_sync.py`, `README.md`, `docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+Проверки: time/topology/CITIC + constraints — 5 passed; полный pytest — **39 passed**.
+
+Real A/B на одном graph cache, камеры 3/15, 900 кадров:
+
+| Режим | Global IDF1 | Pairwise F1 |
+|---|---:|---:|
+| appearance-only | 0.351803 | 0.796779 |
+| appearance + generic time | 0.351803 | 0.796779 |
+
+Результат не изменился, поэтому time остаётся **OFF**. Измеренную topology для
+Warehouse_000 не выдумывали; её нужно получать из данных переходов.
+
+CITIC real-data: **NOT RUN — dataset и `timesyncs.csv` отсутствуют локально**.
+Синтетический perfect world-position protocol даёт IDF1 1.0.
+
+Артефакт: `runs/v2_graph_time_cam3_15/metrics.json`.
+
+Следующий этап: **10 — reversible decisions и Identity Correction**.
+
+Коммит: `feat: add optional camera transitions` (этот коммит).
 

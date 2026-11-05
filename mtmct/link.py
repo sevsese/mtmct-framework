@@ -6,6 +6,7 @@ from .association import Config, associate, associate_graph, load_tracklets, sav
 from .export import export_predictions
 from .cache import validate_cache
 from .memory import apply_memory
+from .time_sync import CameraTransitionModel, parse_offsets
 
 
 def run(run_dir: Path, cfg: Config, scene_id: int = 0,
@@ -59,6 +60,8 @@ def main():
     p.add_argument("--time",action="store_true",help="Enable time constraints for graph matcher")
     p.add_argument("--memory",action="store_true",help="Enable offline prototype memory")
     p.add_argument("--memory-similarity",type=float,default=0.90)
+    p.add_argument("--camera-offset",action="append",default=[],metavar="CAMERA=SECONDS")
+    p.add_argument("--topology",type=Path,help="JSON measured/forbidden camera routes")
     a=p.parse_args()
     cfg=Config(max_cost=a.max_cost,min_similarity=a.min_similarity,max_gap_seconds=a.max_gap,
                max_speed_mps=a.max_speed,overlap_distance_m=a.max_overlap_distance,
@@ -66,7 +69,9 @@ def main():
                temporal_weight=a.temporal_weight,fps=a.fps,
                require_geometry=a.require_geometry,
                use_geometry=not a.ignore_geometry,
-               use_time=True if a.matcher=="baseline" else a.time)
+               use_time=True if a.matcher=="baseline" else a.time,
+               camera_offsets_s=parse_offsets(a.camera_offset),
+               transition_model=CameraTransitionModel.from_json(a.topology) if a.topology else None)
     if a.matcher=="graph" and not a.time:
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,out_csv,out_txt=run(

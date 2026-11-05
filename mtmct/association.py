@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 import numpy as np
+from .time_sync import track_times
 
 
 @dataclass
@@ -27,6 +28,8 @@ class Config:
     require_geometry: bool = False
     use_geometry: bool = True
     use_time: bool = True
+    camera_offsets_s: dict[int, float] | None = None
+    transition_model: object | None = None
 
 
 def unit(v: list[float] | np.ndarray) -> np.ndarray:
@@ -41,8 +44,10 @@ def frames(t: dict) -> dict[int, tuple[float,float]]:
 
 def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, float]:
     """(allowed, normalized spatial penalty, temporal penalty)."""
-    start_a, end_a = int(a["start_frame"]), int(a["end_frame"])
-    start_b, end_b = int(b["start_frame"]), int(b["end_frame"])
+    start_a_frame, end_a_frame = int(a["start_frame"]), int(a["end_frame"])
+    start_b_frame, end_b_frame = int(b["start_frame"]), int(b["end_frame"])
+    start_a, end_a = track_times(a, cfg.fps, cfg.camera_offsets_s)
+    start_b, end_b = track_times(b, cfg.fps, cfg.camera_offsets_s)
     overlapping = max(start_a, start_b) <= min(end_a, end_b)
     if overlapping and int(a["camera_id"]) == int(b["camera_id"]):
         return False, 1., 1.
@@ -52,7 +57,16 @@ def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, floa
     if not cfg.use_geometry:
         if overlapping:
             return True, 0.0, 0.0
-        gap = (max(start_a, start_b) - min(end_a, end_b)) / cfg.fps
+        gap = max(start_a, start_b) - min(end_a, end_b)
+        earlier, later = (a,b) if end_a < start_b else (b,a)
+        if cfg.transition_model:
+            transition = cfg.transition_model.evaluate(
+                int(earlier["camera_id"]), int(later["camera_id"]), gap)
+            if not transition.allowed:
+                return False, 0.0, 1.0
+            if transition.status == "unknown":
+                return True, 0.0, min(gap / max(cfg.max_gap_seconds, 1e-10), 1.0)
+            return True, 0.0, transition.penalty
         if gap > cfg.max_gap_seconds:
             return False, 0.0, 1.0
         return True, 0.0, min(gap / cfg.max_gap_seconds, 1.0)
@@ -73,9 +87,15 @@ def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, floa
 
     # Choose chronological order for transition test.
     earlier, later = (a,b) if end_a < start_b else (b,a)
-    gap_frames = int(later["start_frame"]) - int(earlier["end_frame"])
-    gap = gap_frames / cfg.fps
-    if gap > cfg.max_gap_seconds:
+    gap = max(start_a, start_b) - min(end_a, end_b)
+    transition_penalty = None
+    if cfg.transition_model:
+        transition = cfg.transition_model.evaluate(
+            int(earlier["camera_id"]), int(later["camera_id"]), gap)
+        if not transition.allowed:
+            return False, 1., 1.
+        transition_penalty = transition.penalty if transition.status != "unknown" else None
+    elif gap > cfg.max_gap_seconds:
         return False, 1., 1.
     p, q = frames(earlier), frames(later)
     if p and q:
@@ -89,7 +109,9 @@ def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, floa
         return False, 1., 1.
     else:
         spatial = 0.5
-    return True, spatial, min(gap / cfg.max_gap_seconds, 1.)
+    temporal = transition_penalty if transition_penalty is not None else min(
+        gap / max(cfg.max_gap_seconds, 1e-10), 1.)
+    return True, spatial, temporal
 
 
 def pair_cost(a: dict, b: dict, cfg: Config) -> float | None:
