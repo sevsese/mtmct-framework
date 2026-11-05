@@ -6,6 +6,7 @@ import csv
 from pathlib import Path
 import cv2
 from .geometry import camera_number
+from .video import read_frame
 
 
 def id_color(gid: int) -> tuple[int,int,int]:
@@ -31,9 +32,10 @@ def render(scene_dir: Path, predictions: Path, output: Path,
             if max_frames and fid>=max_frames:continue
             tracks[(camera_number(r["camera_id"]),fid)].append(r)
     caps={camera_number(p.stem):cv2.VideoCapture(str(p)) for p in paths}
-    if not all(c.isOpened() for c in caps.values()):
-        raise RuntimeError("Cannot open all camera videos")
+    writer = None
     try:
+        if not all(c.isOpened() for c in caps.values()):
+            raise RuntimeError("Cannot open all camera videos")
         first=next(iter(caps.values()))
         source_fps=first.get(cv2.CAP_PROP_FPS) or 30.
         fh=int(first.get(cv2.CAP_PROP_FRAME_HEIGHT)*scale)
@@ -48,7 +50,7 @@ def render(scene_dir: Path, predictions: Path, output: Path,
         while max_frames<=0 or frame_id<max_frames:
             images=[]
             for cam,cap in caps.items():
-                ok,frame=cap.read()
+                ok,frame=read_frame(cap, frame_id)
                 if not ok:break
                 if frame_id % stride != 0:
                     images.append(None)
@@ -72,6 +74,8 @@ def render(scene_dir: Path, predictions: Path, output: Path,
         writer.release()
         print("Created mosaic:",output)
     finally:
+        if writer is not None:
+            writer.release()
         for cap in caps.values():cap.release()
 
 

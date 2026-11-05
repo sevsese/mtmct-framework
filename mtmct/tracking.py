@@ -5,6 +5,7 @@ between independent video sequences. Detected samples are streamed to CSV.
 """
 from __future__ import annotations
 import argparse
+import gc
 from collections import defaultdict
 import csv
 import json
@@ -15,6 +16,7 @@ import numpy as np
 from .geometry import calibration_maps, camera_number, project_pixel
 from .reid import ReID, normalized
 from .export import FIELDS
+from .video import read_frame
 
 
 def run(scene_dir: Path, output: Path, model_name: str,
@@ -74,7 +76,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
             started=time.perf_counter()
             try:
                 while fid<max_frames or max_frames<=0:
-                    ok,frame=cap.read()
+                    ok,frame=read_frame(cap, fid)
                     if not ok:break
                     if fid % stride != 0:
                         fid+=1;continue
@@ -145,6 +147,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                   "embedding":normalized(emb).tolist(),
                                   "samples":track["samples"]})
             del model
+            gc.collect()  # YOLO predictor/callback cycles otherwise retain camera state.
             if device.startswith("cuda"):
                 import torch
                 torch.cuda.empty_cache()

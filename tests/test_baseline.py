@@ -1,10 +1,44 @@
 import csv
+import json
 from pathlib import Path
 import numpy as np
+import pytest
 from mtmct.geometry import pixel_to_floor_matrix, project_pixel, camera_number
 from mtmct.association import associate, Config, pair_cost
 from mtmct.gt import value
 from mtmct.synthetic import make_demo
+from mtmct.evaluate import eval_2d
+from mtmct.video import read_frame
+
+
+def test_video_decode_failure_is_not_silent_eof():
+    class Capture:
+        def read(self):
+            return False, None
+
+        def get(self, prop):
+            return 900
+
+    with pytest.raises(RuntimeError, match="287 of 900"):
+        read_frame(Capture(), 287)
+    assert read_frame(Capture(), 900) == (False, None)
+
+
+def test_evaluation_prefers_two_valid_matches_over_one_high_iou(tmp_path):
+    # Diagonal IoU sum is larger, but its second pair is below 0.5.
+    # Both off-diagonal pairs exceed 0.5 and must count as detections.
+    gt = tmp_path / "gt.json"
+    gt.write_text(json.dumps({"0": [
+        {"object type": "Person", "object id": i,
+         "2d bounding box visible": {"Camera_0003": box}}
+        for i, box in [(1, [0, 0, 10, 10]), (2, [3, 0, 13, 10])]
+    ]}), encoding="utf-8")
+    pred = tmp_path / "pred.csv"
+    pred.write_text("frame_id,camera_id,global_id,x1,y1,x2,y2\n"
+                    "0,3,1,0,0,10,10\n0,3,2,-3,0,7,10\n", encoding="utf-8")
+    result = eval_2d(pred, gt, [3], 1, 1)
+    assert result["detection_recall"] == 1.0
+    assert result["IDTP"] == 2
 
 
 def track(camera, lid, start, end, embedding, positions):

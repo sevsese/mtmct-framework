@@ -64,7 +64,11 @@ def eval_2d(pred_path:Path, gt_path:Path, cameras:list[int],
                 gt_total+=len(gt)
                 if not gt or not pr:continue
                 m=np.asarray([[iou(g[1],p[1]) for p in pr] for g in gt])
-                row,col=linear_sum_assignment(-m)
+                # Maximize valid match count first, IoU only breaks ties.
+                # Matching raw IoU then filtering can discard valid pairs.
+                valid = m >= threshold
+                score = valid * (min(m.shape) + 1 + m)
+                row,col=linear_sum_assignment(-score)
                 for a,b in zip(row,col):
                     if m[a,b]>=threshold:
                         matches[(gt[a][0],pr[b][0])]+=1

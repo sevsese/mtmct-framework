@@ -55,7 +55,7 @@ def main():
     render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
     cross=sum(len({c for c,l in mapping if mapping[(c,l)]==gid})>1
               for gid in set(mapping.values()))
-    print(f"DONE: {len(tracklets)} local tracks, {len(edges)} accepted edges, "
+    print(f"DONE: {len(tracklets)} local tracks, {len(edges)} candidate edges, "
           f"{cross} cross-camera global IDs")
     print("Video:",out/"mosaic.mp4")
 

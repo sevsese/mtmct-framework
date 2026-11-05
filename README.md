@@ -6,13 +6,17 @@
 
 ## Быстрый запуск
 
-Из Anaconda Prompt:
+Из PowerShell (Python 3.11, NVIDIA GPU):
 
 ```bat
-conda activate neuro_clean
-cd /d "C:\path\to\mtmct-framework"
-python -m mtmct
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+.venv\Scripts\python.exe -m pip install -c constraints-windows.txt -e ".[dev]"
 ```
+
+OSNet требует отдельной установки Torchreid; команды и проверенные результаты
+приведены в [отчёте Windows](docs/WINDOWS_VALIDATION.md). Завершите установку
+перед запуском `.venv\Scripts\python.exe -m mtmct`.
 
 Для разработки:
 
@@ -21,7 +25,7 @@ python -m pip install -e ".[dev]"
 python -m pytest -q
 ```
 
-Или запусти `run_demo.cmd`. Одна команда скачивает недостающие видео, выполняет локальный трекинг, связывает Local ID в Global ID, создаёт CSV и `mosaic.mp4`.
+Или запусти `run_demo.cmd`: он использует `.venv` рядом с проектом и передаёт параметры (например, `run_demo.cmd --device cpu`). Одна команда скачивает недостающие видео, выполняет локальный трекинг, связывает Local ID в Global ID, создаёт CSV и `mosaic.mp4`.
 
 Стандартный сценарий:
 

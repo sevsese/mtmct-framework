@@ -1,0 +1,6 @@
+# Validated Python 3.11 / GTX 1660 Ti environment; CUDA wheels installed first.
+torch==2.6.0
+torchvision==0.21.0
+ultralytics==8.4.0
+numpy==1.26.4
+opencv-python==4.11.0.86
