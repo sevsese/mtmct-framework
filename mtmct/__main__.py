@@ -27,8 +27,9 @@ def main():
     p.add_argument("--model",default="yolo26l.pt")
     p.add_argument("--device",default="cuda:0")
     p.add_argument("--max-frames",type=int,default=900,help="0 = full videos")
-    p.add_argument("--imgsz",type=int,default=960)
+    p.add_argument("--imgsz",type=int,default=1536)
     p.add_argument("--conf",type=float,default=0.10)
+    p.add_argument("--tracker",default="bytetrack.yaml")
     p.add_argument("--sample-every",type=int,default=5)
     p.add_argument("--min-similarity",type=float,default=0.80)
     p.add_argument("--max-cost",type=float,default=0.125)
@@ -57,7 +58,7 @@ def main():
         if missing:
             download(a.split,a.scene,a.cameras,a.data_root,False)
         run(scene_dir,out,a.model,"osnet",None,a.device,a.max_frames,1,
-            a.sample_every,a.imgsz,a.conf,cameras=a.cameras)
+            a.sample_every,a.imgsz,a.conf,cameras=a.cameras,tracker=a.tracker)
 
     cfg=Config(appearance_weight=0.95,spatial_weight=0.0 if not a.geometry else 0.20,
                temporal_weight=0.05,max_cost=a.max_cost,

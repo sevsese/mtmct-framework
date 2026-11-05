@@ -462,7 +462,38 @@ Real WILDTRACK 3/7-camera и geometry A/B: **NOT RUN — dataset отсутст�
 | V5 | graph + generic time | 0.351803 | 0.796779 | OFF |
 | V6 | graph + identity correction | 0.351803 | 0.796779 | OFF |
 
-Ни одна экспериментальная стадия не превзошла V1, поэтому production default
-не изменён. Главный измеренный резерв — local detection/tracking: Oracle V2
-поднимает IDF1 до 0.938891.
+Ни одна association-стадия V3–V6 не превзошла V1. Главный измеренный резерв —
+local detection/tracking: Oracle V2 поднимает IDF1 до 0.938891; следующий
+раздел фиксирует полученный за счёт detector resolution прирост.
+
+## Recall tuning — detector resolution и ByteTrack thresholds
+
+Статус: **PASS — новый лучший end-to-end результат**
+
+Одинаковые камеры 3/15 и первые 300 кадров:
+
+| Конфигурация | Detection recall | Detection precision | Global IDF1 | Pairwise F1 |
+|---|---:|---:|---:|---:|
+| 960, conf 0.10, default ByteTrack | 0.379793 | 0.983230 | 0.515375 | 0.930761 |
+| 960, conf 0.05, default ByteTrack | 0.379793 | 0.983230 | 0.515375 | 0.930761 |
+| 960, conf 0.05, tuned ByteTrack | 0.378539 | 0.981311 | 0.513458 | 0.930049 |
+| 1280, conf 0.10, default ByteTrack | 0.459827 | 0.959660 | 0.584446 | **0.960318** |
+| 1536, conf 0.10, default ByteTrack | **0.507366** | **0.974709** | **0.599327** | 0.883605 |
+
+Снижение confidence само по себе ничего не изменило из-за стандартного
+`new_track_thresh=0.25`. Ослабление ByteTrack слегка ухудшило результат.
+Реальный прирост дал размер detector input.
+
+Полный A/B на 900 кадрах:
+
+| imgsz | Detection recall | Detection F1 | Global IDF1 | Pairwise F1 | FPS камер 3/15 |
+|---:|---:|---:|---:|---:|---:|
+| 960 | 0.298398 | 0.457684 | 0.397140 | **0.885740** | 24.39 / 26.01 |
+| 1536 | **0.381229** | **0.547818** | **0.465632** | 0.869168 | 16.36 / 16.42 |
+
+Recall вырос на 8.28 п.п. (27.8% относительно), Global IDF1 — на 6.85 п.п.
+(17.2% относительно). Precision остался 0.972996. `imgsz=1536` принят как
+quality-default; для более слабых GPU остаётся явный `--imgsz 960`/`768`.
+
+Артефакт: `runs/recall_best_1536_900/` (не добавляется в Git).
 

@@ -44,14 +44,15 @@ conda activate neuro_clean
 ```
 
 ```bat
-python -m mtmct --cameras 3 15 --max-frames 900 --conf 0.10 --min-similarity 0.80 --max-cost 0.125
+python -m mtmct --cameras 3 15 --max-frames 900 --imgsz 1536 --conf 0.10 --min-similarity 0.80 --max-cost 0.125
 ```
 
 Полезные параметры:
 
 - `--max-frames 0` — обработать видео целиком;
 - `--device cuda:0` — выбрать NVIDIA GPU или `--device cpu` для запуска без CUDA;
-- `--imgsz 768` — уменьшить нагрузку на GPU;
+- `--imgsz 1536` — текущий quality-default; `960` или `768` уменьшают нагрузку на GPU;
+- `--tracker mtmct/bytetrack_recall.yaml` — воспроизвести эксперимент с ослабленными порогами ByteTrack; он не улучшил метрики и не является default;
 - `--min-similarity 0.85` — ещё строже связывать Local ID;
 - `--link-only` — пересчитать Global ID без повторного YOLO/OSNet;
 - `--no-download` — завершиться ошибкой, если локальных входных файлов нет;
@@ -152,9 +153,11 @@ python -m mtmct.download --split val --scene Warehouse_022 --ground-truth --no-v
 `evaluate` считает версионированный custom Global 2D IDF1 по bbox внутри
 `(камера, кадр)`. Это внутренняя метрика разработки, не официальный NVIDIA 3D HOTA.
 
-Существующий прогон на 900 кадрах по новому протоколу
-`global-2d-idf1-v1` даёт Global IDF1 `0.397140`, IDP `0.851874`, IDR
-`0.258925` и Pairwise F1 `0.885740`. Старое значение diagnostic IDF1
+Новый quality-прогон на 900 кадрах с `imgsz=1536` по протоколу
+`global-2d-idf1-v1` даёт Global IDF1 `0.465632`, IDP `0.827023`, IDR
+`0.324035`, detection recall `0.381229` и Pairwise F1 `0.869168`.
+Предыдущий `imgsz=960` давал IDF1 `0.397140` и detection recall `0.298398`.
+Старое значение diagnostic IDF1
 `0.3759` вычислялось другим протоколом и напрямую не сравнивается.
 
 ## Структура кода

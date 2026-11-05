@@ -23,7 +23,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
         reid_method: str, reid_weights: str | None, device: str,
         max_frames: int, stride: int, sample_every: int,
         imgsz: int, conf: float, reid_model: str = "osnet_x1_0",
-        cameras: list[int] | None = None):
+        cameras: list[int] | None = None, tracker: str | Path = "bytetrack.yaml"):
     from ultralytics import YOLO
     if stride<1 or sample_every<1:
         raise ValueError("stride and sample_every must be positive")
@@ -81,7 +81,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
                     if not ok:break
                     if fid % stride != 0:
                         fid+=1;continue
-                    result=model.track(frame,persist=True,tracker="bytetrack.yaml",
+                    result=model.track(frame,persist=True,tracker=str(tracker),
                                        classes=[0],conf=conf,imgsz=imgsz,
                                        device=device,verbose=False)[0]
                     crops=[]; sampled_keys=[]
@@ -171,7 +171,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
         detector=model_name, reid=reid_weights or reid_method,
         feature_dimension=next(iter(dimensions), None),
         config={"max_frames":max_frames,"stride":stride,"sample_every":sample_every,
-                "imgsz":imgsz,"conf":conf,"reid_method":reid_method,
+                "imgsz":imgsz,"conf":conf,"tracker":str(tracker),"reid_method":reid_method,
                 "reid_model":reid_model},
     )
     print(f"Wrote {len(summaries)} tracklets to {output/'local_tracklets.json'}")
@@ -189,12 +189,13 @@ def main():
     p.add_argument("--max-frames",type=int,default=300,help="0 = all frames")
     p.add_argument("--stride",type=int,default=1)
     p.add_argument("--sample-every",type=int,default=5)
-    p.add_argument("--imgsz",type=int,default=960)
+    p.add_argument("--imgsz",type=int,default=1536)
     p.add_argument("--conf",type=float,default=0.12)
+    p.add_argument("--tracker",default="bytetrack.yaml")
     p.add_argument("--cameras",type=int,nargs="+",default=None)
     a=p.parse_args()
     run(a.scene_dir,a.out,a.model,a.reid,a.reid_weights,a.device,
         a.max_frames,a.stride,a.sample_every,a.imgsz,a.conf,
-        reid_model=a.reid_model,cameras=a.cameras)
+        reid_model=a.reid_model,cameras=a.cameras,tracker=a.tracker)
 
 if __name__=="__main__":main()
