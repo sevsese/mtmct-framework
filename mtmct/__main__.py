@@ -39,6 +39,7 @@ def main():
     p.add_argument("--memory-similarity",type=float,default=0.90)
     p.add_argument("--camera-offset",action="append",default=[],metavar="CAMERA=SECONDS")
     p.add_argument("--topology",type=Path)
+    p.add_argument("--correct-identities",action="store_true")
     p.add_argument("--link-only",action="store_true",help="Reuse existing local_tracklets.json")
     p.add_argument("--no-download",action="store_true")
     p.add_argument("--scale",type=float,default=0.45)
@@ -68,7 +69,8 @@ def main():
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,predictions,_=link_run(
         out,cfg,expected_detector=a.model,matcher=a.matcher,
-        memory=a.memory,memory_similarity=a.memory_similarity)
+        memory=a.memory,memory_similarity=a.memory_similarity,
+        correct_identities=a.correct_identities)
     if not a.link_only:
         render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
     cross=sum(len({c for c,l in mapping if mapping[(c,l)]==gid})>1

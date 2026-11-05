@@ -110,6 +110,10 @@ baseline остаётся default, потому что текущий graph A/B 
 Неизвестный маршрут ничего не запрещает. CITIC world-position оценивается
 отдельной командой `python -m mtmct.citic` и не смешивается с bbox IDF1.
 
+`--correct-identities` для graph перестраивает компоненты из сохранённых рёбер,
+подтверждает или отклоняет provisional merges и пишет `identity_correction.json`.
+Исходные observations и Local ID при этом не изменяются.
+
 ## Диагностика
 
 ```bat

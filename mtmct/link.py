@@ -7,12 +7,13 @@ from .export import export_predictions
 from .cache import validate_cache
 from .memory import apply_memory
 from .time_sync import CameraTransitionModel, parse_offsets
+from .correction import rebuild
 
 
 def run(run_dir: Path, cfg: Config, scene_id: int = 0,
         expected_detector: str | None = None, matcher: str = "baseline",
         allow_same_camera_fragments: bool = False, memory: bool = False,
-        memory_similarity: float = 0.9):
+        memory_similarity: float = 0.9, correct_identities: bool = False):
     manifest = validate_cache(run_dir, expected_detector)
     if manifest.get("legacy"):
         print("WARNING:", manifest["warning"])
@@ -23,6 +24,13 @@ def run(run_dir: Path, cfg: Config, scene_id: int = 0,
         mapping,edges=associate(tracklets,cfg)
     else:
         raise ValueError("matcher must be baseline or graph")
+    if correct_identities:
+        if matcher != "graph":
+            raise ValueError("identity correction requires --matcher graph")
+        mapping,edges,conflicts=rebuild(tracklets,edges,cfg)
+        (run_dir/"identity_correction.json").write_text(
+            __import__("json").dumps({"conflicts":conflicts,"journal":edges},indent=2),
+            encoding="utf-8")
     if memory:
         mapping,records,memory_decisions=apply_memory(
             tracklets,mapping,similarity_threshold=memory_similarity)
@@ -62,6 +70,7 @@ def main():
     p.add_argument("--memory-similarity",type=float,default=0.90)
     p.add_argument("--camera-offset",action="append",default=[],metavar="CAMERA=SECONDS")
     p.add_argument("--topology",type=Path,help="JSON measured/forbidden camera routes")
+    p.add_argument("--correct-identities",action="store_true")
     a=p.parse_args()
     cfg=Config(max_cost=a.max_cost,min_similarity=a.min_similarity,max_gap_seconds=a.max_gap,
                max_speed_mps=a.max_speed,overlap_distance_m=a.max_overlap_distance,
@@ -76,7 +85,7 @@ def main():
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,out_csv,out_txt=run(
         a.run_dir,cfg,a.scene_id,a.model,a.matcher,a.allow_same_camera_fragments,
-        a.memory,a.memory_similarity)
+        a.memory,a.memory_similarity,a.correct_identities)
     accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher=="graph" else len(edges)
     print(f"Local tracklets: {len(tracklets)}, accepted edges: {accepted}, global IDs: {len(set(mapping.values()))}")
     print("Results:", out_csv, out_txt)

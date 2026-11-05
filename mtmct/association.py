@@ -166,15 +166,15 @@ def associate_graph(tracklets: list[dict], cfg: Config,
             if (tracklets[left]["camera_id"] == tracklets[right]["camera_id"]
                     and not allow_same_camera_fragments):
                 journal.append({"i": left, "j": right, "decision": "rejected",
-                                "reason": "same_camera_disabled"})
+                                "status": "rejected", "reason": "same_camera_disabled"})
                 continue
             score = pair_score(tracklets[left], tracklets[right], cfg)
             edge = {"i": left, "j": right, **score}
             if score["cost"] is None:
-                edge["decision"] = "rejected"
+                edge.update(decision="rejected",status="rejected")
                 journal.append(edge)
             elif score["cost"] > cfg.max_cost:
-                edge.update(decision="rejected", reason="max_cost")
+                edge.update(decision="rejected", status="rejected", reason="max_cost")
                 journal.append(edge)
             else:
                 candidates.append(edge)
@@ -182,7 +182,7 @@ def associate_graph(tracklets: list[dict], cfg: Config,
     for edge in candidates:
         left_root, right_root = find(edge["i"]), find(edge["j"])
         if left_root == right_root:
-            edge.update(decision="rejected", reason="already_connected")
+            edge.update(decision="rejected", status="rejected", reason="already_connected")
             journal.append(edge)
             continue
         compatible = True
@@ -198,12 +198,12 @@ def associate_graph(tracklets: list[dict], cfg: Config,
             if not compatible:
                 break
         if not compatible:
-            edge.update(decision="rejected", reason="component_conflict")
+            edge.update(decision="rejected", status="rejected", reason="component_conflict")
             journal.append(edge)
             continue
         parent[right_root] = left_root
         members[left_root].update(members.pop(right_root))
-        edge.update(decision="accepted", reason="best_compatible_edge")
+        edge.update(decision="accepted", status="provisional", reason="best_compatible_edge")
         journal.append(edge)
     roots = sorted({find(index) for index in range(len(tracklets))}, key=lambda root: (
         min(int(tracklets[index]["start_frame"]) for index in members[root]),

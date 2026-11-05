@@ -381,5 +381,40 @@ CITIC real-data: **NOT RUN — dataset и `timesyncs.csv` отсутствуют
 
 Следующий этап: **10 — reversible decisions и Identity Correction**.
 
-Коммит: `feat: add optional camera transitions` (этот коммит).
+Коммит: `8036ff1 feat: add optional camera transitions`.
+
+## Этап 10 — Reversible Identity Correction
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. Graph journal использует статусы `provisional`, `confirmed`, `rejected` и сохраняет score breakdown.
+2. Validator проверяет все пары объединяемых компонентов, включая appearance и hard constraints.
+3. False transitive merge отклоняется перестроением из сохранённых рёбер, без попытки разъединить Union-Find.
+4. Исходные observations, Local ID и tracklets не мутируются.
+5. Assignment после correction детерминирован и не требует повторного YOLO/ReID.
+
+Изменённые файлы: `mtmct/correction.py`, `mtmct/association.py`,
+`mtmct/link.py`, `mtmct/__main__.py`, `tests/test_identity_correction.py`,
+`README.md`, `docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+Проверки: correction + graph tests — 4 passed; полный pytest — **41 passed**.
+
+Real graph journal, камеры 3/15, 900 кадров:
+
+| Режим | Global IDF1 | Pairwise F1 | Conflicts |
+|---|---:|---:|---:|
+| correction OFF | 0.351803 | 0.796779 | — |
+| correction ON | 0.351803 | 0.796779 | 0 |
+
+Все 19 provisional merge подтверждены; 2396 ранее отклонённых рёбер остались
+rejected. На этом run correction корректно является no-op и остаётся **OFF**,
+поскольку улучшения метрики нет.
+
+Артефакт: `runs/v2_graph_correction_cam3_15/identity_correction.json`.
+
+Следующий этап: **11 — WILDTRACK adapter и portability без обязательной geometry**.
+
+Коммит: `feat: validate and correct identities` (этот коммит).
 
