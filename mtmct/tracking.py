@@ -16,6 +16,7 @@ from .geometry import calibration_maps, camera_number, project_pixel
 from .reid import ReID, normalized
 from .export import FIELDS
 from .cache import write_manifest
+from .features import MAX_SAMPLES, crop_quality
 
 
 def run(scene_dir: Path, output: Path, model_name: str,
@@ -65,7 +66,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
             print(f"  video FPS={video_fps:.2f}; size={int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
             # id -> data. Only a sum and count for embeddings, not every crop.
             by_id=defaultdict(lambda: {"start_frame":10**12,"end_frame":-1,
-                                       "positions":[],"embedding_sum":None,"samples":0})
+                                       "positions":[],"embedding_sum":None,"samples":0,
+                                       "feature_samples":[]})
             fid=0
             processed=0
             if device.startswith("cuda"):
@@ -112,15 +114,18 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                 crop=frame[int(y1):int(y2),int(x1):int(x2)]
                                 if crop.size:
                                     crops.append(cv2.cvtColor(crop,cv2.COLOR_BGR2RGB))
-                                    sampled_keys.append(local_id)
+                                    clipped = x1 <= 0 or y1 <= 0 or x2 >= w or y2 >= h
+                                    sampled_keys.append((local_id, crop_quality(crops[-1], float(score), clipped)))
                     embeddings=reid.encode(crops)
                     processed += 1
-                    for lid,e in zip(sampled_keys,embeddings):
+                    for (lid,quality),e in zip(sampled_keys,embeddings):
                         row=by_id[lid]
                         if row["embedding_sum"] is None:
                             row["embedding_sum"]=np.zeros_like(e,dtype=np.float64)
                         row["embedding_sum"]+=e
                         row["samples"]+=1
+                        row["feature_samples"].append((quality,e.tolist()))
+                        row["feature_samples"] = sorted(row["feature_samples"], reverse=True)[:MAX_SAMPLES]
                     if fid%100==0:
                         print(f" camera={cam} frame={fid} tracks={len(by_id)}",flush=True)
                     fid+=1
@@ -143,6 +148,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                   "end_frame":int(track["end_frame"]),
                                   "positions":track["positions"],
                                   "embedding":normalized(emb).tolist() if emb is not None else [],
+                                  "feature_quality":[sample[0] for sample in track["feature_samples"]],
+                                  "feature_vectors":[sample[1] for sample in track["feature_samples"]],
                                   "samples":track["samples"]})
             del model
             if device.startswith("cuda"):

@@ -15,12 +15,13 @@ from .cache import write_config, write_manifest
 from .export import FIELDS
 from .nvidia import NvidiaDatasetAdapter
 from .reid import ReID, normalized
+from .features import MAX_SAMPLES, crop_quality
 
 
 def generate(scene_dir: Path, output: Path, cameras: list[int], max_frames: int,
              device: str = "cpu", reid_method: str = "color",
              reid_weights: str | None = None, reid_model: str = "osnet_x1_0",
-             sample_every: int = 5):
+             sample_every: int = 5, analysis_labels: Path | None = None):
     if max_frames <= 0 or sample_every <= 0:
         raise ValueError("max_frames and sample_every must be positive")
     if reid_method == "osnet" and not reid_weights:
@@ -42,7 +43,8 @@ def generate(scene_dir: Path, output: Path, cameras: list[int], max_frames: int,
 
     output.mkdir(parents=True, exist_ok=True)
     tracks = defaultdict(lambda: {
-        "start_frame": 10**12, "end_frame": -1, "embedding_sum": None, "samples": 0
+        "start_frame": 10**12, "end_frame": -1, "embedding_sum": None, "samples": 0,
+        "feature_samples": [],
     })
     performance = []
     videos = [scene_dir / "videos" / f"Camera_{camera:04d}.mp4" for camera in cameras]
@@ -83,13 +85,16 @@ def generate(scene_dir: Path, output: Path, cameras: list[int], max_frames: int,
                             crop = frame[int(y1):int(y2), int(x1):int(x2)]
                             if crop.size:
                                 crops.append(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
-                                crop_keys.append(key)
-                    for key, embedding in zip(crop_keys, encoder.encode(crops)):
+                                clipped = x1 <= 0 or y1 <= 0 or x2 >= width or y2 >= height
+                                crop_keys.append((key, crop_quality(crops[-1], 1.0, clipped)))
+                    for (key, quality), embedding in zip(crop_keys, encoder.encode(crops)):
                         track = tracks[key]
                         if track["embedding_sum"] is None:
                             track["embedding_sum"] = np.zeros_like(embedding, dtype=np.float64)
                         track["embedding_sum"] += embedding
                         track["samples"] += 1
+                        track["feature_samples"].append((quality, embedding.tolist()))
+                        track["feature_samples"] = sorted(track["feature_samples"], reverse=True)[:MAX_SAMPLES]
             finally:
                 capture.release()
             seconds = time.perf_counter() - started
@@ -105,11 +110,20 @@ def generate(scene_dir: Path, output: Path, cameras: list[int], max_frames: int,
             "start_frame": int(track["start_frame"]), "end_frame": int(track["end_frame"]),
             "positions": [],
             "embedding": normalized(embedding).tolist() if embedding is not None else [],
+            "feature_quality": [sample[0] for sample in track["feature_samples"]],
+            "feature_vectors": [sample[1] for sample in track["feature_samples"]],
             "samples": track["samples"],
             "source": "oracle_gt_bbox",
         })
     (output / "local_tracklets.json").write_text(json.dumps(summaries), encoding="utf-8")
     (output / "performance.json").write_text(json.dumps(performance, indent=2), encoding="utf-8")
+    if analysis_labels:
+        analysis_labels.parent.mkdir(parents=True, exist_ok=True)
+        analysis_labels.write_text(json.dumps([
+            {"camera_id": camera, "local_id": local_id, "gt_object_id": gt_id}
+            for camera, mapping in sorted(local_ids.items())
+            for gt_id, local_id in sorted(mapping.items(), key=lambda item: item[1])
+        ]), encoding="utf-8")
     dimensions = {len(row["embedding"]) for row in summaries if row["embedding"]}
     write_manifest(
         output, scene=scene_dir.name, cameras=cameras,
@@ -139,10 +153,12 @@ def main():
     parser.add_argument("--reid-weights")
     parser.add_argument("--reid-model", default="osnet_x1_0")
     parser.add_argument("--sample-every", type=int, default=5)
+    parser.add_argument("--analysis-labels", type=Path,
+                        help="Optional GT labels for analysis only; matcher never reads this file")
     args = parser.parse_args()
     summaries = generate(args.scene_dir, args.out, args.cameras, args.max_frames,
                          args.device, args.reid, args.reid_weights,
-                         args.reid_model, args.sample_every)
+                         args.reid_model, args.sample_every, args.analysis_labels)
     print(f"Wrote {len(summaries)} oracle tracklets to {args.out}")
 
 

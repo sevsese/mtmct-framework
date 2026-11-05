@@ -10,8 +10,8 @@ merge выполняются только после отдельного раз
 | 02 | Версионированный Global 2D IDF1 и oracle-тесты | выполнен локально |
 | 03 | Manifest, независимые стадии и честный offline link-only | выполнен локально |
 | 04 | Воспроизводимый full baseline и Oracle Tracklets | выполнен локально |
-| 05 | Диагностика и агрегация ReID | следующий |
-| 06 | Tracklet refinement с provenance | ожидает |
+| 05 | Диагностика и агрегация ReID | выполнен локально |
+| 06 | Tracklet refinement с provenance | следующий |
 | 07 | Constrained graph association и журнал решений | ожидает |
 | 08 | Offline Global Memory | ожидает |
 | 09 | Время, offsets и опциональная топология | ожидает |

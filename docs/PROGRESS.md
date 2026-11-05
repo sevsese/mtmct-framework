@@ -203,5 +203,43 @@ F1 `0.825221`, Detection F1 `0.594132`; FPS по камерам 12.62/13.31/12.7
 
 Следующий этап: **05 — диагностика ReID и quality-aware aggregation на неизменном кэше**.
 
-Коммит: `test: establish MTMCT baselines` (этот коммит).
+Коммит: `ffc842d test: establish MTMCT baselines`.
+
+## Этап 05 — диагностика и агрегация ReID
+
+Статус: **PASS**
+
+Проверяемые результаты:
+
+1. На tracklet сохраняются максимум 20 лучших OSNet samples с quality, поэтому память ограничена.
+2. Реализованы отключаемые `first`, `mean`, `topk` и `prototypes` без повторного GPU inference.
+3. Analysis-only labels не попадают в matcher artifacts; формируются Rank-1, AP, precision@recall, пары CSV и cosine PNG.
+4. Все политики сравнены на одном feature cache реальных кропов и одинаковом matcher.
+5. Новая политика не включена по умолчанию без выигрыша.
+
+Изменённые файлы: `mtmct/features.py`, `mtmct/tracking.py`, `mtmct/oracle.py`,
+`tests/test_feature_aggregation.py`, `README.md`, `docs/ROADMAP.md`, `docs/PROGRESS.md`.
+
+Один cache: Oracle GT bbox, real OSNet crops, камеры 3/15, 900 кадров,
+matcher `min_similarity=0.80`, `max_cost=0.125`.
+
+Проверки: targeted feature/ReID tests — PASS; полный pytest — **29 passed**.
+
+| Policy | Rank-1 | AP | P@R=0.90 | Global IDF1 | Pairwise F1 |
+|---|---:|---:|---:|---:|---:|
+| first | 0.439394 | 0.391090 | 0.051195 | 0.635594 | 0.280579 |
+| mean (baseline) | **0.727273** | **0.732361** | **0.118110** | **0.938891** | **0.914875** |
+| top-k quality | 0.621212 | 0.612352 | 0.065502 | 0.868902 | 0.821834 |
+| 3 prototypes | 0.560606 | 0.560521 | 0.073529 | 0.785238 | 0.662979 |
+
+Артефакты: `runs/v2_reid_feature_cache`, `runs/v2_reid_{first,mean,topk,prototypes}`;
+каждый содержит `reid_report.json`, `reid_pairs.csv`, `cosine_distributions.png` и MTMCT metrics.
+
+Решение: сохранить mean по всем sampled crops как default. Top-k и prototypes
+остаются экспериментальными OFF, потому что на замороженном сравнении ухудшили
+Global IDF1. Сохранённые top-20 samples предназначены для дешёвых будущих ablation.
+
+Следующий этап: **06 — Tracklet Refinement с dry-run и provenance**.
+
+Коммит: `feat: aggregate quality-aware features` (этот коммит).
 

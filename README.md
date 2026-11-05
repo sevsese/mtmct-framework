@@ -89,6 +89,10 @@ python -m mtmct.link --run-dir runs/oracle --model oracle_gt_boxes --ignore-geom
 Здесь GT предоставляет только bbox. Local ID перенумеровываются независимо по
 камерам, OSNet извлекается из настоящих видеокропов, а matcher не получает GT identity.
 
+Tracking сохраняет не более 20 лучших feature samples на tracklet. Политики
+`first`, `mean`, `topk` и `prototypes` можно сравнивать offline через
+`python -m mtmct.features`; по текущему A/B обычный `mean` остаётся default.
+
 ## Диагностика
 
 ```bat
