@@ -24,6 +24,7 @@ IMGSZ = 1536
 CONF = 0.10
 DEVICE = "cuda:0"
 RENDER_SCALE = 0.25
+MIN_SIMILARITY = 0.72      # cross-camera cosine gate; 0.85 was too strict here
 RUN_NAME = "hackaton_5cam_60s_v1"
 # ============================================================================
 
@@ -44,7 +45,8 @@ def main():
           camera_sources=sources, max_seconds=DURATION_SECONDS)
     # No calibration or GT: associations are appearance-only and exploratory.
     cfg = Config(appearance_weight=.95, spatial_weight=0., temporal_weight=0.,
-                 min_similarity=.85, max_cost=.125, use_geometry=False, use_time=False)
+                 min_similarity=MIN_SIMILARITY, max_cost=.14,
+                 use_geometry=False, use_time=False)
     _, mapping, _, predictions, _ = link(out, cfg, memory=True, memory_similarity=.95)
     render(VIDEO_DIR, predictions, out / "mosaic.mp4", stride=FRAME_STRIDE,
            scale=RENDER_SCALE, cameras=list(sources), camera_sources=sources,

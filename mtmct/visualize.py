@@ -38,7 +38,8 @@ def render(scene_dir: Path, predictions: Path, output: Path,
     with Path(predictions).open(newline='', encoding='utf-8') as stream:
         for row in csv.DictReader(stream):
             fid = int(row['frame_id'])
-            if (max_frames > 0 and fid >= max_frames) or (frame_ids is not None and fid not in frame_ids):
+            if ((duration_seconds is None and max_frames > 0 and fid >= max_frames) or
+                    (frame_ids is not None and fid not in frame_ids)):
                 continue
             tracks[(int(row['camera_id']), fid)].append(row)
     with ExitStack() as stack:
@@ -72,6 +73,8 @@ def render(scene_dir: Path, predictions: Path, output: Path,
                 for cam, reader in readers.items():
                     source_id = (round(frame_id * reader.fps / source_fps)
                                  if duration_seconds is not None else frame_id)
+                    if duration_seconds is not None:
+                        source_id = round(source_id / stride) * stride
                     frame = reader.get(source_id)
                     if frame is not None:
                         any_frame = True

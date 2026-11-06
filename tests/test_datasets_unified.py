@@ -62,6 +62,28 @@ def test_render_sparse_image_frame_ids(tmp_path):
     assert video.is_file() and video.stat().st_size > 0
 
 
+def test_duration_render_keeps_predictions_after_default_frame_limit(tmp_path):
+    import csv
+    for cam in (0, 1):
+        _img(tmp_path/f'late_{cam}'/'00000314.png')
+    predictions = tmp_path/'late.csv'
+    with predictions.open('w', newline='', encoding='utf-8') as stream:
+        writer = csv.DictWriter(stream, fieldnames=['camera_id','frame_id','global_id','x1','y1','x2','y2'])
+        writer.writeheader()
+        for cam in (0, 1):
+            writer.writerow({'camera_id':cam, 'frame_id':314, 'global_id':7,
+                             'x1':8, 'y1':8, 'x2':40, 'y2':40})
+    video = tmp_path/'late.mp4'
+    render(tmp_path, predictions, video, stride=2, scale=1., cameras=[0,1],
+           camera_sources={0:tmp_path/'late_0', 1:tmp_path/'late_1'},
+           fps_fallback=2, duration_seconds=160)
+    capture = cv2.VideoCapture(str(video))
+    assert int(capture.get(cv2.CAP_PROP_FRAME_COUNT)) == 1
+    ok, frame = capture.read()
+    capture.release()
+    assert ok and int(frame.max()) - int(frame.min()) > 30
+
+
 def test_citic_world_only_no_fake_bboxes(tmp_path):
     capture = tmp_path/'capture1'
     capture.mkdir()
