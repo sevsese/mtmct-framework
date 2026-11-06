@@ -134,6 +134,9 @@ python -m mtmct.wildtrack evaluate --root data/WILDTRACK --pred runs/wildtrack/g
 # Image_subsets/C1..C7 и annotations_positions.
 python run_wildtrack.py --check-only
 python run_wildtrack.py --cameras 0 1 2 3 --max-frames 40 --out runs/wildtrack_4cam_40f
+
+# В VS Code: меняй настройки в файле и нажми Run Python File.
+python run_wildtrack_experiment.py
 ```
 
 Поле `frame_id` в prediction CSV должно совпадать с числом в имени annotation
