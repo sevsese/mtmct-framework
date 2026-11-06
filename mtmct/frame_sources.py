@@ -67,12 +67,23 @@ class FrameSource:
             self._cursor += 1
         return frame if ok else None
 
-    def iter_frames(self, max_frames: int, stride: int = 1):
+    def iter_frames(self, max_frames: int, stride: int = 1,
+                    frame_ids: set[int] | None = None):
+        """Yield frames without renumbering image sequences.
+
+        ``frame_ids`` is for sparse annotated datasets such as WILDTRACK.  It
+        selects real filenames, rather than treating their numeric suffixes as
+        contiguous video indices.
+        """
         if stride < 1:
             raise ValueError('stride must be >= 1')
+        if frame_ids is not None and max_frames > 0:
+            raise ValueError('Use max_frames=0 when selecting explicit frame_ids')
         if self.images is not None:
             for fid in sorted(self.images):
                 if (max_frames > 0 and fid >= max_frames) or fid % stride != 0:
+                    continue
+                if frame_ids is not None and fid not in frame_ids:
                     continue
                 frame = self.get(fid)
                 if frame is None:

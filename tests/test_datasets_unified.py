@@ -35,6 +35,13 @@ def test_frame_source_image_keeps_real_frame_ids(tmp_path):
         assert src.fps == 10.0
 
 
+def test_frame_source_selects_sparse_real_frame_ids(tmp_path):
+    _img(tmp_path/'00000000.png')
+    _img(tmp_path/'00000005.png')
+    with FrameSource(tmp_path) as src:
+        assert [fid for fid, _ in src.iter_frames(0, frame_ids={5})] == [5]
+
+
 def test_citic_world_only_no_fake_bboxes(tmp_path):
     capture = tmp_path/'capture1'
     capture.mkdir()

@@ -1,7 +1,7 @@
 import csv
 import json
 
-from mtmct.wildtrack import WildtrackAdapter, evaluate, inspect_dataset
+from mtmct.wildtrack import WildtrackAdapter, evaluate, frame_sources, inspect_dataset, select_frame_ids
 
 
 def _dataset(tmp_path):
@@ -56,3 +56,36 @@ def test_perfect_bbox_identity_evaluation_for_three_and_seven_cameras(tmp_path):
         assert report["pairwise_association"]["F1"] == 1.0
         assert report["geometry_used"] is False
         assert report["interpolation"] is False
+
+
+def test_evaluation_can_limit_to_processed_raw_frames(tmp_path):
+    root = _dataset(tmp_path)
+    report = evaluate(_predictions(root, [0, 1]), root, [0, 1], frame_ids={0})
+    assert report["global"]["gt_count"] == 2
+    assert report["global"]["pred_count"] == 2
+    assert report["frame_ids"] == [0]
+
+
+def test_select_frame_ids_requires_common_camera_images(tmp_path):
+    root = _dataset(tmp_path)
+    for camera in range(2):
+        directory = root / 'Image_subsets' / f'C{camera + 1}'
+        directory.mkdir(parents=True)
+        for frame in (0, 5):
+            (directory / f'{frame:08d}.png').write_bytes(b'')
+    assert frame_sources(root, [0, 1])[0].name == 'C1'
+    assert select_frame_ids(root, [0, 1], max_frames=1) == [0]
+
+
+def test_wildtrack_runner_check_only(tmp_path):
+    from run_wildtrack import main
+
+    root = _dataset(tmp_path)
+    for camera in range(2):
+        directory = root / 'Image_subsets' / f'C{camera + 1}'
+        directory.mkdir(parents=True)
+        for frame in (0, 5):
+            (directory / f'{frame:08d}.png').write_bytes(b'')
+    report = main(['--root', str(root), '--cameras', '0', '1',
+                   '--max-frames', '1', '--check-only'])
+    assert report['selected_frame_ids'] == [0]

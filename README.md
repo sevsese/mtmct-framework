@@ -128,6 +128,12 @@ WILDTRACK оценивается отдельным адаптером стро�
 python -m mtmct.wildtrack inspect --root data/WILDTRACK --out runs/wildtrack_inspect.json
 python -m mtmct.wildtrack evaluate --root data/WILDTRACK --pred runs/wildtrack/global_tracks_2d.csv --cameras 0 1 2 --out runs/wildtrack/metrics_3cam.json
 python -m mtmct.wildtrack evaluate --root data/WILDTRACK --pred runs/wildtrack/global_tracks_2d.csv --cameras 0 1 2 3 4 5 6 --out runs/wildtrack/metrics_7cam.json
+
+# Полный прогон по WILDTRACK: сначала проверка архива, затем GPU-запуск.
+# Архив распаковать в data/WILDTRACK так, чтобы внутри были
+# Image_subsets/C1..C7 и annotations_positions.
+python run_wildtrack.py --check-only
+python run_wildtrack.py --cameras 0 1 2 3 --max-frames 40 --out runs/wildtrack_4cam_40f
 ```
 
 Поле `frame_id` в prediction CSV должно совпадать с числом в имени annotation

@@ -25,7 +25,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
         max_frames: int, stride: int, sample_every: int,
         imgsz: int, conf: float, reid_model: str = "osnet_x1_0",
         cameras: list[int] | None = None, tracker: str | Path = "bytetrack.yaml",
-        camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0):
+        camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0,
+        frame_ids: set[int] | None = None):
     from ultralytics import YOLO
     if stride<1 or sample_every<1:
         raise ValueError("stride and sample_every must be positive")
@@ -79,7 +80,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
                 torch.cuda.reset_peak_memory_stats()
             started=time.perf_counter()
             try:
-                for fid, frame in reader.iter_frames(max_frames, stride):
+                for fid, frame in reader.iter_frames(max_frames, stride, frame_ids):
                     result=model.track(frame,persist=True,tracker=str(tracker),
                                        classes=[0],conf=conf,imgsz=imgsz,
                                        device=device,verbose=False)[0]
@@ -171,7 +172,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
         config={"max_frames":max_frames,"stride":stride,"sample_every":sample_every,
                 "imgsz":imgsz,"conf":conf,"tracker":str(tracker),"reid_method":reid_method,
                 "reid_model":reid_model,"camera_sources":{str(c):str(p) for c,p in source_paths.items()},
-                "fps_fallback":fps_fallback},
+                "fps_fallback":fps_fallback,
+                "frame_ids": sorted(frame_ids) if frame_ids is not None else None},
     )
     print(f"Wrote {len(summaries)} tracklets to {output/'local_tracklets.json'}")
 

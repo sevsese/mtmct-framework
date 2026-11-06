@@ -27,7 +27,10 @@ class WildtrackObservation:
 class WildtrackAdapter:
     def __init__(self, root: Path):
         self.root = Path(root)
-        self.annotation_dir = self.root / "annotation_positions"
+        official = self.root / "annotations_positions"
+        # Early internal experiments used the singular spelling.  Keep it as a
+        # fallback, but prefer the directory name in the official archive.
+        self.annotation_dir = official if official.is_dir() else self.root / "annotation_positions"
 
     def annotation_files(self) -> list[Path]:
         if not self.annotation_dir.is_dir():
@@ -61,6 +64,33 @@ class WildtrackAdapter:
                     )
 
 
+def frame_sources(root: Path, cameras: list[int]) -> dict[int, Path]:
+    """Return WILDTRACK's C1..C7 image folders for zero-based camera IDs."""
+    root = Path(root)
+    sources = {camera: root / "Image_subsets" / f"C{camera + 1}" for camera in cameras}
+    missing = [str(path) for path in sources.values() if not path.is_dir()]
+    if missing:
+        raise FileNotFoundError("Missing WILDTRACK image folders: " + ", ".join(missing))
+    return sources
+
+
+def select_frame_ids(root: Path, cameras: list[int], max_frames: int = 0) -> list[int]:
+    """Choose annotated moments present in every requested camera.
+
+    The image filenames (for example ``00000005.png``) are retained as frame
+    IDs.  They must not be naively treated as 2 FPS contiguous indices.
+    """
+    adapter = WildtrackAdapter(root)
+    annotated = {int(path.stem) for path in adapter.annotation_files()}
+    available = annotated
+    for directory in frame_sources(root, cameras).values():
+        available &= {int(path.stem) for path in directory.glob("*.png") if path.stem.isdigit()}
+    selected = sorted(available)
+    if not selected:
+        raise FileNotFoundError("No annotated WILDTRACK frames are available in every selected camera")
+    return selected[:max_frames] if max_frames > 0 else selected
+
+
 def inspect_dataset(root: Path) -> dict:
     adapter = WildtrackAdapter(root)
     files = adapter.annotation_files()
@@ -68,7 +98,7 @@ def inspect_dataset(root: Path) -> dict:
     per_camera = Counter(item.camera_id for item in observations)
     return {
         "dataset": "WILDTRACK",
-        "annotation_schema": "annotation_positions/*.json",
+        "annotation_schema": "annotations_positions/*.json",
         "annotated_fps": ANNOTATED_FPS,
         "interpolation": False,
         "annotation_count": len(files),
@@ -82,7 +112,8 @@ def inspect_dataset(root: Path) -> dict:
     }
 
 
-def evaluate(pred_path: Path, root: Path, cameras: list[int], threshold: float = 0.5) -> dict:
+def evaluate(pred_path: Path, root: Path, cameras: list[int], threshold: float = 0.5,
+             frame_ids: set[int] | None = None) -> dict:
     if not 0 <= threshold <= 1:
         raise ValueError("IoU threshold must be between 0 and 1")
     cameras = sorted(set(cameras))
@@ -91,7 +122,7 @@ def evaluate(pred_path: Path, root: Path, cameras: list[int], threshold: float =
     gt_by_camera = Counter()
     adapter = WildtrackAdapter(root)
     for item in adapter.observations():
-        if item.camera_id not in selected:
+        if item.camera_id not in selected or (frame_ids is not None and item.raw_frame not in frame_ids):
             continue
         key = (item.raw_frame, item.camera_id)
         ground_truth[key].append((item.gt_object_id, item.bbox_xyxy))
@@ -102,7 +133,7 @@ def evaluate(pred_path: Path, root: Path, cameras: list[int], threshold: float =
     with Path(pred_path).open(newline="", encoding="utf-8") as stream:
         for row in csv.DictReader(stream):
             camera = int(row["camera_id"])
-            if camera not in selected:
+            if camera not in selected or (frame_ids is not None and int(row["frame_id"]) not in frame_ids):
                 continue
             key = (int(row["frame_id"]), camera)
             predictions[key].append((int(row["global_id"]), tuple(
@@ -129,6 +160,7 @@ def evaluate(pred_path: Path, root: Path, cameras: list[int], threshold: float =
         "geometry_used": False,
         "iou_threshold": threshold,
         "cameras": cameras,
+        "frame_ids": sorted(frame_ids) if frame_ids is not None else None,
         "global": _identity_metrics(matches, gt_total, pred_total),
         "detection": {
             "TP": matched,
