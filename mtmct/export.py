@@ -20,7 +20,8 @@ def export_predictions(observations_path: str | Path,
                        scene_id: int = 0,
                        height: float = 1.7,
                        width: float = 0.6,
-                       length: float = 0.6):
+                       length: float = 0.6,
+                       excluded_keys: set[tuple[int, int]] | None = None):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     with open(mapping_path, encoding="utf-8") as f:
@@ -35,7 +36,7 @@ def export_predictions(observations_path: str | Path,
         writer.writeheader()
         for r in reader:
             key=(int(r["camera_id"]),int(r["local_id"]))
-            if key not in mp:
+            if key not in mp or (excluded_keys and key in excluded_keys):
                 continue
             g=mp[key]
             writer.writerow({**r,"global_id":g})

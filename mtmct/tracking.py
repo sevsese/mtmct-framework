@@ -17,26 +17,31 @@ from .reid import ReID, normalized
 from .export import FIELDS
 from .cache import write_manifest
 from .features import MAX_SAMPLES, crop_quality
+from .frame_sources import FrameSource
 
 
 def run(scene_dir: Path, output: Path, model_name: str,
         reid_method: str, reid_weights: str | None, device: str,
         max_frames: int, stride: int, sample_every: int,
         imgsz: int, conf: float, reid_model: str = "osnet_x1_0",
-        cameras: list[int] | None = None, tracker: str | Path = "bytetrack.yaml"):
+        cameras: list[int] | None = None, tracker: str | Path = "bytetrack.yaml",
+        camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0):
     from ultralytics import YOLO
     if stride<1 or sample_every<1:
         raise ValueError("stride and sample_every must be positive")
-    videos=sorted((scene_dir/"videos").glob("Camera_*.mp4"))
-    if cameras is not None:
-        wanted=set(cameras)
-        videos=[p for p in videos if camera_number(p.stem) in wanted]
-        found={camera_number(p.stem) for p in videos}
-        if found != wanted:
-            raise FileNotFoundError(f"Missing camera videos: {sorted(wanted-found)}")
-    if not videos:
-        raise FileNotFoundError(f"No Camera_*.mp4 files under {scene_dir}/videos")
-    calibration=calibration_maps(scene_dir/"calibration.json")
+    if camera_sources is None:
+        found_sources = {camera_number(p.stem): p for p in sorted((scene_dir / 'videos').glob('Camera_*.mp4'))}
+    else:
+        found_sources = {int(c): Path(path) for c, path in camera_sources.items()}
+    selected_cameras = sorted(set(cameras)) if cameras is not None else sorted(found_sources)
+    absent = sorted(set(selected_cameras) - set(found_sources))
+    if absent:
+        raise FileNotFoundError(f'Missing camera sources: {absent}')
+    if not selected_cameras:
+        raise FileNotFoundError('No camera video or image sources found')
+    source_paths = {c: found_sources[c] for c in selected_cameras}
+    calibration_path = scene_dir / 'calibration.json'
+    calibration = calibration_maps(calibration_path) if calibration_path.is_file() else {}
     if reid_method == "osnet" and not reid_weights:
         from .weights import download_weights
         reid_weights = str(download_weights(reid_model))
@@ -52,18 +57,16 @@ def run(scene_dir: Path, output: Path, model_name: str,
     with open(output/"observations.csv","w",newline="",encoding="utf-8") as f:
         writer=csv.DictWriter(f,fieldnames=FIELDS)
         writer.writeheader()
-        for video in videos:
-            cam=camera_number(video.stem)
-            H=calibration.get(cam)
+        for cam, video in source_paths.items():
+            H = calibration.get(cam)
             if H is None:
-                print(f"WARNING camera {cam}: no valid cameraMatrix, world positions unavailable")
-            cap=cv2.VideoCapture(str(video))
-            if not cap.isOpened():
-                raise RuntimeError(f"Cannot read video: {video}")
-            model=YOLO(model_name)  # fresh tracker for each camera
-            print(f"Processing camera {cam}: {video.name}",flush=True)
-            video_fps = cap.get(cv2.CAP_PROP_FPS)
-            print(f"  video FPS={video_fps:.2f}; size={int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
+                print(f'Camera {cam}: no verified floor projection; using appearance-only positions')
+            reader = FrameSource(video, fps=fps_fallback)
+            model = YOLO(model_name)  # independent ByteTrack instance per camera
+            print(f'Processing camera {cam}: {video}', flush=True)
+            video_fps = reader.fps
+            vw, vh = reader.dimensions()
+            print(f'  FPS={video_fps:.2f}; size={vw}x{vh}')
             # id -> data. Only a sum and count for embeddings, not every crop.
             by_id=defaultdict(lambda: {"start_frame":10**12,"end_frame":-1,
                                        "positions":[],"embedding_sum":None,"samples":0,
@@ -76,11 +79,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
                 torch.cuda.reset_peak_memory_stats()
             started=time.perf_counter()
             try:
-                while fid<max_frames or max_frames<=0:
-                    ok,frame=cap.read()
-                    if not ok:break
-                    if fid % stride != 0:
-                        fid+=1;continue
+                for fid, frame in reader.iter_frames(max_frames, stride):
                     result=model.track(frame,persist=True,tracker=str(tracker),
                                        classes=[0],conf=conf,imgsz=imgsz,
                                        device=device,verbose=False)[0]
@@ -129,9 +128,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
                             row["feature_samples"], key=lambda sample: -sample[0])[:MAX_SAMPLES]
                     if fid%100==0:
                         print(f" camera={cam} frame={fid} tracks={len(by_id)}",flush=True)
-                    fid+=1
             finally:
-                cap.release()
+                reader.close()
             if device.startswith("cuda"):
                 import torch
                 torch.cuda.synchronize()
@@ -166,13 +164,14 @@ def run(scene_dir: Path, output: Path, model_name: str,
         raise ValueError(f"Inconsistent ReID feature dimensions: {sorted(dimensions)}")
     write_manifest(
         output, scene=scene_dir.name,
-        cameras=[camera_number(path.stem) for path in videos],
-        inputs=[scene_dir/"calibration.json", *videos],
+        cameras=selected_cameras,
+        inputs=[*( [calibration_path] if calibration_path.is_file() else [] ), *source_paths.values()],
         detector=model_name, reid=reid_weights or reid_method,
         feature_dimension=next(iter(dimensions), None),
         config={"max_frames":max_frames,"stride":stride,"sample_every":sample_every,
                 "imgsz":imgsz,"conf":conf,"tracker":str(tracker),"reid_method":reid_method,
-                "reid_model":reid_model},
+                "reid_model":reid_model,"camera_sources":{str(c):str(p) for c,p in source_paths.items()},
+                "fps_fallback":fps_fallback},
     )
     print(f"Wrote {len(summaries)} tracklets to {output/'local_tracklets.json'}")
 

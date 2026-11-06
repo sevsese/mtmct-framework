@@ -184,6 +184,32 @@ def eval_2d(pred_path: Path, gt_path: Path, cameras: list[int],
     return result
 
 
+def save_report(result: dict, output: Path) -> None:
+    """Store exactly the same JSON and error totals for CLI and pipeline runs."""
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    with (output.parent / "errors.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["error_type", "count"])
+        writer.writerows([
+            ["identity_false_positive", result["global"]["IDFP"]],
+            ["identity_false_negative", result["global"]["IDFN"]],
+            ["detection_false_positive", result["detection"]["FP"]],
+            ["detection_false_negative", result["detection"]["FN"]],
+        ])
+
+
+def inferred_max_frames(pred_path: Path) -> int:
+    """For --max-frames 0, evaluate up through the last predicted frame."""
+    last = -1
+    with Path(pred_path).open(newline="", encoding="utf-8") as stream:
+        for row in csv.DictReader(stream):
+            last = max(last, int(row["frame_id"]))
+    if last < 0:
+        raise ValueError("Cannot infer evaluation window from empty predictions; use --max-frames")
+    return last + 1
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pred", type=Path, required=True)
@@ -198,17 +224,7 @@ def main():
     text = json.dumps(result, indent=2)
     print(text)
     if args.out:
-        args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(text, encoding="utf-8")
-        with (args.out.parent / "errors.csv").open("w", newline="", encoding="utf-8") as stream:
-            writer = csv.writer(stream)
-            writer.writerow(["error_type", "count"])
-            writer.writerows([
-                ["identity_false_positive", result["global"]["IDFP"]],
-                ["identity_false_negative", result["global"]["IDFN"]],
-                ["detection_false_positive", result["detection"]["FP"]],
-                ["detection_false_negative", result["detection"]["FN"]],
-            ])
+        save_report(result, args.out)
 
 
 if __name__ == "__main__":

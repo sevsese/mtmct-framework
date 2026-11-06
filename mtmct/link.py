@@ -8,16 +8,31 @@ from .cache import validate_cache
 from .memory import apply_memory
 from .time_sync import CameraTransitionModel, parse_offsets
 from .correction import rebuild
+from .occlusion_repair import (RepairConfig, read_observations,
+                               find_duplicate_tracklets, relink_after_occlusion)
+import json
+from dataclasses import asdict
 
 
 def run(run_dir: Path, cfg: Config, scene_id: int = 0,
         expected_detector: str | None = None, matcher: str = "baseline",
         allow_same_camera_fragments: bool = False, memory: bool = False,
-        memory_similarity: float = 0.9, correct_identities: bool = False):
+        memory_similarity: float = 0.9, correct_identities: bool = False,
+        repair_occlusions: bool = False, repair_config: RepairConfig | None = None):
     manifest = validate_cache(run_dir, expected_detector)
     if manifest.get("legacy"):
         print("WARNING:", manifest["warning"])
     tracklets=load_tracklets(run_dir/"local_tracklets.json")
+    suppressed = set()
+    observations = None
+    repair_log = None
+    if repair_occlusions:
+        repair_config = repair_config or RepairConfig()
+        observations = read_observations(run_dir / "observations.csv")
+        tracklets, suppressed, duplicates = find_duplicate_tracklets(
+            tracklets, observations, repair_config)
+        repair_log = {"experimental": True, "settings": asdict(repair_config),
+                      "suppressed_duplicates": duplicates}
     if matcher == "graph":
         mapping,edges=associate_graph(tracklets,cfg,allow_same_camera_fragments)
     elif matcher == "baseline":
@@ -37,11 +52,22 @@ def run(run_dir: Path, cfg: Config, scene_id: int = 0,
         (run_dir/"global_memory.json").write_text(
             __import__("json").dumps({"groups":records,"decisions":memory_decisions},indent=2),
             encoding="utf-8")
+    if repair_occlusions:
+        mapping, recoveries = relink_after_occlusion(
+            tracklets, mapping, cfg, observations, repair_config)
+        repair_log["occlusion_relinks"] = recoveries
+        repair_log["summary"] = {
+            "suppressed_tracklets": len(suppressed),
+            "accepted_relinks": sum(x["decision"] == "accepted" for x in recoveries),
+        }
+        (run_dir / "occlusion_repair.json").write_text(
+            json.dumps(repair_log, indent=2), encoding="utf-8")
     save_mapping(mapping,run_dir/"global_ids.json")
     (run_dir/"association_edges.json").write_text(
         __import__("json").dumps(edges, indent=2), encoding="utf-8")
     out_csv,out_txt=export_predictions(
-        run_dir/"observations.csv",run_dir/"global_ids.json",run_dir,scene_id=scene_id)
+        run_dir/"observations.csv",run_dir/"global_ids.json",run_dir,
+        scene_id=scene_id, excluded_keys=suppressed)
     return tracklets, mapping, edges, out_csv, out_txt
 
 
@@ -71,6 +97,8 @@ def main():
     p.add_argument("--camera-offset",action="append",default=[],metavar="CAMERA=SECONDS")
     p.add_argument("--topology",type=Path,help="JSON measured/forbidden camera routes")
     p.add_argument("--correct-identities",action="store_true")
+    p.add_argument("--repair-occlusions",action="store_true",
+                   help="Experimental: suppress short duplicate tracklets and relink short occlusions")
     a=p.parse_args()
     cfg=Config(max_cost=a.max_cost,min_similarity=a.min_similarity,max_gap_seconds=a.max_gap,
                max_speed_mps=a.max_speed,overlap_distance_m=a.max_overlap_distance,
@@ -85,7 +113,8 @@ def main():
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,out_csv,out_txt=run(
         a.run_dir,cfg,a.scene_id,a.model,a.matcher,a.allow_same_camera_fragments,
-        a.memory,a.memory_similarity,a.correct_identities)
+        a.memory,a.memory_similarity,a.correct_identities,
+        repair_occlusions=a.repair_occlusions)
     accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher=="graph" else len(edges)
     print(f"Local tracklets: {len(tracklets)}, accepted edges: {accepted}, global IDs: {len(set(mapping.values()))}")
     print("Results:", out_csv, out_txt)

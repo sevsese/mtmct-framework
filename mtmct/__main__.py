@@ -25,9 +25,11 @@ def main():
     p.add_argument("--data-root",type=Path,default=Path("data"))
     p.add_argument("--out",type=Path,default=None)
     p.add_argument("--model",default="yolo26l.pt")
+    p.add_argument("--reid-model",choices=["osnet_x1_0","osnet_ibn_x1_0","osnet_ain_x1_0"],default="osnet_x1_0",
+                   help="Person ReID backbone; use a fresh --out for each model")
     p.add_argument("--device",default="cuda:0")
     p.add_argument("--max-frames",type=int,default=900,help="0 = full videos")
-    p.add_argument("--imgsz",type=int,default=1536)
+    p.add_argument("--imgsz",type=int,default=1920)
     p.add_argument("--conf",type=float,default=0.10)
     p.add_argument("--tracker",default="bytetrack.yaml")
     p.add_argument("--sample-every",type=int,default=5)
@@ -42,23 +44,45 @@ def main():
     p.add_argument("--topology",type=Path)
     p.add_argument("--correct-identities",action="store_true")
     p.add_argument("--link-only",action="store_true",help="Reuse existing local_tracklets.json")
+    p.add_argument("--repair-occlusions",action="store_true",
+                   help="Experimental: filter duplicates and reconnect short, corroborated track gaps")
+    p.add_argument("--render-link-only",action="store_true",
+                   help="Rebuild mosaic.mp4 even when --link-only is set")
+    p.add_argument("--evaluate",action="store_true",
+                   help="Automatically save metrics.json and errors.csv using GT")
+    p.add_argument("--gt",type=Path,default=None,
+                   help="Override ground_truth.json for --evaluate")
+    p.add_argument("--eval-iou",type=float,default=0.5,
+                   help="BBox matching IoU for --evaluate")
     p.add_argument("--no-download",action="store_true")
     p.add_argument("--scale",type=float,default=0.45)
     a=p.parse_args()
 
     tag="_".join(map(str,a.cameras))
     out=a.out or Path("runs")/f"{a.scene.lower()}_cam{tag}"
-    write_config(out, vars(a) | {"data_root": str(a.data_root), "out": str(out)})
+    write_config(out, {key: str(value) if isinstance(value, Path) else value
+                       for key, value in vars(a).items()} | {"out": str(out)})
     scene_dir=a.data_root/"MTMC_Tracking_2026"/a.split/a.scene
+    gt_path = a.gt or scene_dir / "ground_truth.json"
+    if a.evaluate and not gt_path.is_file():
+        # Avoid spending GPU-hours only to discover evaluation is impossible.
+        if a.no_download or a.gt is not None:
+            raise FileNotFoundError(
+                f"Cannot compute metrics: GT file not found: {gt_path}. "
+                "Provide --gt PATH, or download the scene ground truth.")
+        download(a.split, a.scene, a.cameras, a.data_root, True, videos=False)
+        if not gt_path.is_file():
+            raise FileNotFoundError(f"Ground truth unavailable: {gt_path}")
     if not a.link_only:
-        required=[scene_dir/"calibration.json",*(scene_dir/"videos"/f"Camera_{c:04d}.mp4" for c in a.cameras)]
+        required=[*( [scene_dir / "calibration.json"] if a.geometry else [] ),
+                  *(scene_dir/"videos"/f"Camera_{c:04d}.mp4" for c in a.cameras)]
         missing=[path for path in required if not path.exists()]
         if missing and a.no_download:
             raise FileNotFoundError(f"Missing inputs: {missing}")
         if missing:
             download(a.split,a.scene,a.cameras,a.data_root,False)
         run(scene_dir,out,a.model,"osnet",None,a.device,a.max_frames,1,
-            a.sample_every,a.imgsz,a.conf,cameras=a.cameras,tracker=a.tracker)
+            a.sample_every,a.imgsz,a.conf,reid_model=a.reid_model,cameras=a.cameras,tracker=a.tracker)
 
     cfg=Config(appearance_weight=0.95,spatial_weight=0.0 if not a.geometry else 0.20,
                temporal_weight=0.05,max_cost=a.max_cost,
@@ -69,18 +93,29 @@ def main():
     if a.matcher=="graph" and not a.time:
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,predictions,_=link_run(
-        out,cfg,expected_detector=a.model,matcher=a.matcher,
+        out,cfg,expected_detector=None if a.link_only else a.model,matcher=a.matcher,
         memory=a.memory,memory_similarity=a.memory_similarity,
-        correct_identities=a.correct_identities)
-    if not a.link_only:
+        correct_identities=a.correct_identities,
+        repair_occlusions=a.repair_occlusions)
+    if not a.link_only or a.render_link_only:
         render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
     cross=sum(len({c for c,l in mapping if mapping[(c,l)]==gid})>1
               for gid in set(mapping.values()))
     accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher=="graph" else len(edges)
     print(f"DONE: {len(tracklets)} local tracks, {accepted} accepted edges, "
           f"{cross} cross-camera global IDs")
-    if not a.link_only:
+    if not a.link_only or a.render_link_only:
         print("Video:",out/"mosaic.mp4")
+    if a.evaluate:
+        from .evaluate import eval_2d, save_report, inferred_max_frames
+        frame_limit = a.max_frames if a.max_frames > 0 else inferred_max_frames(predictions)
+        report = eval_2d(predictions, gt_path, a.cameras, frame_limit,
+                         threshold=a.eval_iou)
+        save_report(report, out / "metrics.json")
+        print(f"METRICS: Global IDF1={report['global']['IDF1']:.6f}, "
+              f"detection recall={report['detection']['recall']:.6f}")
+        print("Metrics:", out / "metrics.json")
+        print("Errors:", out / "errors.csv")
 
 
 if __name__=="__main__":

@@ -4,11 +4,13 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
 from math import isfinite
 from pathlib import Path
+from typing import Any
 
 from .geometry import camera_number
 from .gt import value
@@ -39,11 +41,29 @@ class NvidiaGTObservation:
 
 
 class NvidiaDatasetAdapter:
-    """Read NVIDIA ground truth without loading the full JSON into memory."""
+    """Read NVIDIA ground truth without loading the full JSON into memory.
+
+    Bad individual annotations are skipped by observations(strict=False),
+    which is the default for batch experiments. Use strict=True to fail fast.
+    The original ground-truth file is never modified.
+    """
 
     def __init__(self, gt_path: str | Path, timing: CameraTiming | None = None):
         self.gt_path = Path(gt_path)
         self.timing = timing or CameraTiming()
+        self.observation_stats: dict[str, Any] = self._empty_stats()
+
+    @staticmethod
+    def _empty_stats() -> dict[str, Any]:
+        return {
+            "total_bboxes": 0,
+            "valid_bboxes": 0,
+            "invalid_bboxes": 0,
+            "invalid_bboxes_by_camera": {},
+            "invalid_bbox_examples": [],
+            "invalid_object_ids": 0,
+            "invalid_camera_ids": 0,
+        }
 
     def frames(self):
         import ijson
@@ -62,12 +82,16 @@ class NvidiaDatasetAdapter:
     def _bbox(raw, frame: int, camera: str) -> tuple[float, float, float, float]:
         if not isinstance(raw, (list, tuple)) or len(raw) != 4:
             raise ValueError(f"Frame {frame}, {camera}: bbox must contain four values")
-        box = tuple(float(x) for x in raw)
+        try:
+            box = tuple(float(x) for x in raw)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Frame {frame}, {camera}: non-numeric bbox {raw!r}") from exc
         if not all(isfinite(x) for x in box) or box[2] <= box[0] or box[3] <= box[1]:
             raise ValueError(f"Frame {frame}, {camera}: invalid bbox {raw!r}")
         return box
 
     def validate(self) -> list[str]:
+        """List GT problems without changing or silently fixing annotations."""
         errors: list[str] = []
         for frame, objects in self.frames():
             seen: set[int] = set()
@@ -78,7 +102,11 @@ class NvidiaDatasetAdapter:
                 if raw_id is None:
                     errors.append(f"Frame {frame}: Person has no object_id")
                     continue
-                ident = int(raw_id)
+                try:
+                    ident = int(raw_id)
+                except (TypeError, ValueError, OverflowError):
+                    errors.append(f"Frame {frame}: invalid object_id {raw_id!r}")
+                    continue
                 if ident in seen:
                     errors.append(f"Frame {frame}: duplicate object_id {ident}")
                 seen.add(ident)
@@ -90,11 +118,20 @@ class NvidiaDatasetAdapter:
                     try:
                         camera_number(camera)
                         self._bbox(raw_box, frame, str(camera))
-                    except (TypeError, ValueError) as exc:
+                    except (TypeError, ValueError, OverflowError) as exc:
                         errors.append(str(exc))
         return errors
 
-    def observations(self, strict: bool = True, max_frames: int | None = None):
+    def observations(self, strict: bool = False, max_frames: int | None = None):
+        """Yield valid observations, optionally failing fast on bad entries.
+
+        strict=False is intentional: a zero-area bounding box is a bad GT
+        annotation, not a reason to abort a whole optimization run.
+        Check observation_stats after consuming the iterator.
+        """
+        stats = self._empty_stats()
+        self.observation_stats = stats
+
         for frame, objects in self.frames():
             if max_frames is not None and frame >= max_frames:
                 break
@@ -105,20 +142,57 @@ class NvidiaDatasetAdapter:
                 boxes = value(obj, "2d_bounding_box_visible")
                 if raw_id is None or not isinstance(boxes, dict):
                     continue
+
+                try:
+                    gt_object_id = int(raw_id)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    if strict:
+                        raise ValueError(f"Frame {frame}: invalid object_id {raw_id!r}") from exc
+                    stats["invalid_object_ids"] += 1
+                    continue
+
                 for camera, raw_box in boxes.items():
                     try:
-                        bbox = self._bbox(raw_box, frame, str(camera))
-                    except (TypeError, ValueError):
+                        camera_id = camera_number(camera)
+                    except (TypeError, ValueError, OverflowError):
                         if strict:
                             raise
+                        stats["invalid_camera_ids"] += 1
                         continue
+
+                    stats["total_bboxes"] += 1
+                    try:
+                        bbox = self._bbox(raw_box, frame, str(camera))
+                    except (TypeError, ValueError, OverflowError) as exc:
+                        if strict:
+                            raise
+                        stats["invalid_bboxes"] += 1
+                        counts = stats["invalid_bboxes_by_camera"]
+                        key = str(camera)
+                        counts[key] = counts.get(key, 0) + 1
+                        if len(stats["invalid_bbox_examples"]) < 10:
+                            stats["invalid_bbox_examples"].append(str(exc))
+                        continue
+
+                    stats["valid_bboxes"] += 1
                     yield NvidiaGTObservation(
                         frame_index=frame,
                         timestamp_s=self.timing.timestamp_s(frame),
-                        camera_id=camera_number(camera),
+                        camera_id=camera_id,
                         bbox_xyxy=bbox,
-                        gt_object_id=int(raw_id),
+                        gt_object_id=gt_object_id,
                     )
+
+        if not strict and stats["invalid_bboxes"]:
+            bad, total = stats["invalid_bboxes"], stats["total_bboxes"]
+            fraction = bad / total if total else 0.0
+            severity = RuntimeWarning if fraction > 0.05 else UserWarning
+            warnings.warn(
+                f"{self.gt_path}: skipped {bad}/{total} invalid GT bboxes "
+                f"({fraction:.2%}); examples: {stats['invalid_bbox_examples'][:3]}",
+                severity,
+                stacklevel=2,
+            )
 
 
 def inspect_scene(scene_dir: str | Path, output: str | Path, timing: CameraTiming | None = None):
@@ -174,6 +248,7 @@ def inspect_scene(scene_dir: str | Path, output: str | Path, timing: CameraTimin
         "frame_index_offset": adapter.timing.frame_index_offset,
         "time_offset_s": adapter.timing.time_offset_s,
         "validation": {"issue_count": len(errors), "samples": errors[:10]},
+        "observation_filtering": adapter.observation_stats,
         "frame_count": len(frames),
         "first_frame": min(frames) if frames else None,
         "last_frame": max(frames) if frames else None,

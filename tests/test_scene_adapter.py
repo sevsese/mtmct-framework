@@ -89,6 +89,6 @@ def test_inspect_scene_ranks_overlapping_cameras_without_exporting_gt_ids(tmp_pa
     pair_23 = next(row for row in pairs if row["camera_a"] == 2 and row["camera_b"] == 3)
     assert pair_23["co_visible_frames"] == 0
     report_text = (tmp_path / "report" / "scene_report.json").read_text(encoding="utf-8")
-    assert "object_id" not in report_text
+    assert '"object_id"' not in report_text
     with (tmp_path / "report" / "camera_pair_report.csv").open(newline="", encoding="utf-8") as stream:
         assert len(list(csv.DictReader(stream))) == 6

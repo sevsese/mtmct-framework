@@ -18,13 +18,30 @@ def write_config(run_dir: str | Path, config: dict) -> Path:
 
 
 def fingerprint(path: str | Path) -> dict:
+    """Fingerprint files by content and image folders by file inventory.
+
+    Directory hashes are metadata-only (name, length, mtime), NOT full JPEG
+    content hashes, to avoid rereading all SCOUT media after every relink.
+    """
     path = Path(path)
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+    if path.is_dir():
+        count = 0
+        total = 0
+        for f in sorted(p for p in path.rglob('*') if p.is_file()):
+            st = f.stat()
+            digest.update(str(f.relative_to(path)).encode('utf-8'))
+            digest.update(f':{st.st_size}:{st.st_mtime_ns}\n'.encode('ascii'))
+            count += 1
+            total += st.st_size
+        return {'path': str(path.resolve()), 'type': 'directory-inventory',
+                'file_count': count, 'size': total, 'sha256': digest.hexdigest()}
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
             digest.update(chunk)
     stat = path.stat()
-    return {"path": str(path.resolve()), "size": stat.st_size, "sha256": digest.hexdigest()}
+    return {'path': str(path.resolve()), 'size': stat.st_size,
+            'sha256': digest.hexdigest()}
 
 
 def _git_sha() -> str | None:
@@ -43,7 +60,7 @@ def write_manifest(run_dir: str | Path, *, scene: str, cameras: list[int],
         "git_sha": _git_sha(),
         "scene": scene,
         "cameras": sorted(cameras),
-        "inputs": [fingerprint(path) for path in inputs if Path(path).is_file()],
+        "inputs": [fingerprint(path) for path in inputs if Path(path).exists()],
         "models": {
             "detector": {"name": detector, **(fingerprint(detector) if Path(detector).is_file() else {})},
             "reid": {"name": reid, **(fingerprint(reid) if Path(reid).is_file() else {})},
