@@ -23,7 +23,7 @@ def render(scene_dir: Path, predictions: Path, output: Path,
            max_frames: int = 300, stride: int = 3, scale: float = 0.5,
            cameras: list[int] | None = None,
            camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0,
-           frame_ids: set[int] | None = None):
+           frame_ids: set[int] | None = None, duration_seconds: float | None = None):
     if stride < 1 or scale <= 0:
         raise ValueError('stride >= 1 and scale > 0 required')
     if camera_sources is None:
@@ -56,29 +56,33 @@ def render(scene_dir: Path, predictions: Path, output: Path,
         if not writer.isOpened():
             raise RuntimeError(f'Cannot create mosaic video: {output}')
         try:
-            if all(reader.images is not None for reader in readers.values()):
+            if duration_seconds is not None:
+                timeline = range(0, round(duration_seconds * source_fps), stride)
+            elif all(reader.images is not None for reader in readers.values()):
                 all_ids = sorted(set().union(*(set(reader.images) for reader in readers.values())))
                 timeline = (fid for fid in all_ids if (max_frames <= 0 or fid < max_frames) and
                             (frame_ids is None or fid in frame_ids))
             else:
                 timeline = range(max_frames) if max_frames > 0 else count()
             for frame_id in timeline:
-                if frame_id % stride != 0 and frame_ids is None:
+                if frame_id % stride != 0 and frame_ids is None and duration_seconds is None:
                     continue
                 images = []
                 any_frame = False
                 for cam, reader in readers.items():
-                    frame = reader.get(frame_id)
+                    source_id = (round(frame_id * reader.fps / source_fps)
+                                 if duration_seconds is not None else frame_id)
+                    frame = reader.get(source_id)
                     if frame is not None:
                         any_frame = True
-                        for r in tracks.get((cam, frame_id), []):
+                        for r in tracks.get((cam, source_id), []):
                             x1, y1, x2, y2 = (int(float(r[k])) for k in ('x1', 'y1', 'x2', 'y2'))
                             gid = int(r['global_id'])
                             color = id_color(gid)
                             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
                             cv2.putText(frame, f'GLOBAL {gid}', (x1, max(20, y1-8)),
                                         cv2.FONT_HERSHEY_SIMPLEX, .75, color, 2)
-                        cv2.putText(frame, f'Camera {cam} frame {frame_id}', (20, 35),
+                        cv2.putText(frame, f'Camera {cam} frame {source_id}', (20, 35),
                                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
                         resized = cv2.resize(frame, (w, h), interpolation=cv2.INTER_AREA)
                     else:

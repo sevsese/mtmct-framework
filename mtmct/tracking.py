@@ -26,7 +26,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
         imgsz: int, conf: float, reid_model: str = "osnet_x1_0",
         cameras: list[int] | None = None, tracker: str | Path = "bytetrack.yaml",
         camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0,
-        frame_ids: set[int] | None = None):
+        frame_ids: set[int] | None = None, max_seconds: float | None = None):
     from ultralytics import YOLO
     if stride<1 or sample_every<1:
         raise ValueError("stride and sample_every must be positive")
@@ -66,6 +66,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
             model = YOLO(model_name)  # independent ByteTrack instance per camera
             print(f'Processing camera {cam}: {video}', flush=True)
             video_fps = reader.fps
+            camera_max_frames = (max(1, round(max_seconds * video_fps))
+                                 if max_seconds is not None else max_frames)
             vw, vh = reader.dimensions()
             print(f'  FPS={video_fps:.2f}; size={vw}x{vh}')
             # id -> data. Only a sum and count for embeddings, not every crop.
@@ -80,7 +82,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
                 torch.cuda.reset_peak_memory_stats()
             started=time.perf_counter()
             try:
-                for fid, frame in reader.iter_frames(max_frames, stride, frame_ids):
+                for fid, frame in reader.iter_frames(camera_max_frames, stride, frame_ids):
                     result=model.track(frame,persist=True,tracker=str(tracker),
                                        classes=[0],conf=conf,imgsz=imgsz,
                                        device=device,verbose=False)[0]
@@ -173,7 +175,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
                 "imgsz":imgsz,"conf":conf,"tracker":str(tracker),"reid_method":reid_method,
                 "reid_model":reid_model,"camera_sources":{str(c):str(p) for c,p in source_paths.items()},
                 "fps_fallback":fps_fallback,
-                "frame_ids": sorted(frame_ids) if frame_ids is not None else None},
+                "frame_ids": sorted(frame_ids) if frame_ids is not None else None,
+                "max_seconds": max_seconds},
     )
     print(f"Wrote {len(summaries)} tracklets to {output/'local_tracklets.json'}")
 
