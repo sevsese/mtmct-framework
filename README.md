@@ -2,6 +2,13 @@
 
 Запускаемый baseline межкамерного трекинга людей: YOLO26l + ByteTrack + OSNet x1.0.
 
+## Локальный веб-интерфейс
+
+Для просмотра камер, рамок, Global ID, статистики и запуска обработки используйте
+`run_web.cmd` и откройте http://127.0.0.1:8000.
+Установка, Linux, форматы данных, ограничения и скриншоты:
+[docs/WEB_INTERFACE.md](docs/WEB_INTERFACE.md). API: [backend/README.md](backend/README.md).
+
 Командная архитектура и распределение задач описаны в `docs/ARCHITECTURE.md` и `docs/ROADMAP.md`. Правила веток и Pull Request находятся в `CONTRIBUTING.md`.
 
 ## Быстрый запуск
