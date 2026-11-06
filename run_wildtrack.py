@@ -14,6 +14,7 @@ from mtmct.association import Config
 from mtmct.cache import write_config
 from mtmct.link import run as link
 from mtmct.tracking import run as track
+from mtmct.visualize import render
 from mtmct.wildtrack import ANNOTATED_FPS, evaluate, frame_sources, inspect_dataset, select_frame_ids
 
 
@@ -31,6 +32,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--imgsz", type=int, default=1536)
     p.add_argument("--conf", type=float, default=0.10)
+    p.add_argument("--render", action="store_true", help="Write mosaic.mp4 with Global IDs")
     p.add_argument("--check-only", action="store_true", help="Validate data only; do not start YOLO")
     return p
 
@@ -65,6 +67,10 @@ def main(argv=None):
                  min_similarity=.80, max_cost=.125, fps=ANNOTATED_FPS,
                  use_geometry=False, use_time=False)
     _, _, _, predictions, _ = link(out, cfg, memory=True, memory_similarity=.95)
+    if args.render:
+        render(args.root, predictions, out / "mosaic.mp4", max_frames=0, stride=1,
+               cameras=cameras, camera_sources=sources, fps_fallback=ANNOTATED_FPS,
+               frame_ids=set(frame_ids))
     metrics = evaluate(predictions, args.root, cameras, frame_ids=set(frame_ids))
     (out / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(metrics, ensure_ascii=False, indent=2))

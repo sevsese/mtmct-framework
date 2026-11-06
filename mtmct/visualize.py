@@ -22,7 +22,8 @@ def id_color(gid: int) -> tuple[int, int, int]:
 def render(scene_dir: Path, predictions: Path, output: Path,
            max_frames: int = 300, stride: int = 3, scale: float = 0.5,
            cameras: list[int] | None = None,
-           camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0):
+           camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0,
+           frame_ids: set[int] | None = None):
     if stride < 1 or scale <= 0:
         raise ValueError('stride >= 1 and scale > 0 required')
     if camera_sources is None:
@@ -37,7 +38,7 @@ def render(scene_dir: Path, predictions: Path, output: Path,
     with Path(predictions).open(newline='', encoding='utf-8') as stream:
         for row in csv.DictReader(stream):
             fid = int(row['frame_id'])
-            if max_frames > 0 and fid >= max_frames:
+            if (max_frames > 0 and fid >= max_frames) or (frame_ids is not None and fid not in frame_ids):
                 continue
             tracks[(int(row['camera_id']), fid)].append(row)
     with ExitStack() as stack:
@@ -57,11 +58,12 @@ def render(scene_dir: Path, predictions: Path, output: Path,
         try:
             if all(reader.images is not None for reader in readers.values()):
                 all_ids = sorted(set().union(*(set(reader.images) for reader in readers.values())))
-                timeline = (fid for fid in all_ids if max_frames <= 0 or fid < max_frames)
+                timeline = (fid for fid in all_ids if (max_frames <= 0 or fid < max_frames) and
+                            (frame_ids is None or fid in frame_ids))
             else:
                 timeline = range(max_frames) if max_frames > 0 else count()
             for frame_id in timeline:
-                if frame_id % stride != 0:
+                if frame_id % stride != 0 and frame_ids is None:
                     continue
                 images = []
                 any_frame = False

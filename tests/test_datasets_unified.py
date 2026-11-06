@@ -42,6 +42,26 @@ def test_frame_source_selects_sparse_real_frame_ids(tmp_path):
         assert [fid for fid, _ in src.iter_frames(0, frame_ids={5})] == [5]
 
 
+def test_render_sparse_image_frame_ids(tmp_path):
+    import csv
+    for cam in (0, 1):
+        for frame in (0, 5):
+            _img(tmp_path/f'cam_{cam}'/f'{frame:08d}.png')
+    predictions = tmp_path/'tracks.csv'
+    with predictions.open('w', newline='', encoding='utf-8') as stream:
+        writer = csv.DictWriter(stream, fieldnames=['camera_id','frame_id','global_id','x1','y1','x2','y2'])
+        writer.writeheader()
+        for cam in (0, 1):
+            for frame in (0, 5):
+                writer.writerow({'camera_id':cam, 'frame_id':frame, 'global_id':1,
+                                 'x1':10, 'y1':10, 'x2':30, 'y2':40})
+    video = tmp_path/'mosaic.mp4'
+    render(tmp_path, predictions, video, max_frames=0, stride=1, scale=.25,
+           cameras=[0,1], camera_sources={0:tmp_path/'cam_0', 1:tmp_path/'cam_1'},
+           fps_fallback=2, frame_ids={0,5})
+    assert video.is_file() and video.stat().st_size > 0
+
+
 def test_citic_world_only_no_fake_bboxes(tmp_path):
     capture = tmp_path/'capture1'
     capture.mkdir()
