@@ -85,6 +85,10 @@ def test_occlusion_relink_reuses_existing_global_id_if_other_camera_witnesses(tm
     mapping, _ = associate(tracks, cfg)
     assert mapping[(15, 2)] == mapping[(3, 2)]
     assert mapping[(15, 21)] != mapping[(15, 2)]
+    # Repair must explicitly opt in to calibrated geometry.
+    disabled, _ = relink_after_occlusion(tracks, mapping, cfg, read_observations(p))
+    assert disabled[(15, 21)] != disabled[(15, 2)]
+    cfg.use_geometry = True
     repaired, journal = relink_after_occlusion(tracks, mapping, cfg, read_observations(p))
     assert repaired[(15, 21)] == repaired[(15, 2)]
     assert journal[0]["decision"] == "accepted"
@@ -103,7 +107,7 @@ def test_no_witness_cannot_join_low_similarity_or_implausible_motion(tmp_path):
     tracks[1]["embedding"] = [1, 0]
     save_obs(p, [row(15, 81, 2, world=(0, 0)), row(15, 90, 21, world=(100, 100))])
     result, _ = relink_after_occlusion(tracks, {(15, 2): 2, (15, 21): 19},
-                                       Config(use_geometry=False), read_observations(p))
+                                       Config(use_geometry=True), read_observations(p))
     assert result[(15, 2)] != result[(15, 21)]
 
 
@@ -163,7 +167,7 @@ def test_unique_cross_camera_witness_rescues_069_similarity(tmp_path):
     save_obs(p, [row(15, 81, 2, world=(0, 0)),
                  row(15, 90, 21, world=(1.1, 0))])
     mapping = {(15, 2): 2, (3, 2): 2, (15, 21): 19, (3, 3): 3}
-    config = Config(use_geometry=False)
+    config = Config(use_geometry=True)
     repaired, journal = relink_after_occlusion(
         [old, new, witness, unrelated], mapping, config, read_observations(p))
     assert repaired[(15, 21)] == 2
@@ -186,7 +190,7 @@ def test_weak_appearance_rescue_rejected_if_second_person_nearby(tmp_path):
     mapping = {(15, 2): 2, (3, 2): 2, (15, 21): 19, (3, 3): 3}
     repaired, journal = relink_after_occlusion(
         [old, new, witness, competitor], mapping,
-        Config(use_geometry=False), read_observations(p))
+        Config(use_geometry=True), read_observations(p))
     assert repaired[(15, 21)] == 19
     assert journal[0]['reason'] == 'insufficient_unique_witness'
 

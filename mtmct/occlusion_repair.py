@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .association import Config, _space_constraints, frames, unit
+from .association import Config, groups_compatible, frames, unit
 
 Key = tuple[int, int]
 
@@ -91,7 +91,7 @@ def _similarity(left: dict, right: dict) -> float | None:
 
 
 def find_duplicate_tracklets(tracklets: list[dict], observations: dict[Key, dict[int, dict]],
-                             settings: RepairConfig = RepairConfig()):
+                             settings: RepairConfig = RepairConfig(), *, use_geometry: bool = True):
     """Suppress ONLY a very short duplicate fully shadowed by a long-lived track.
 
     Two overlapping people should not be suppressed: require matching ReID,
@@ -115,7 +115,7 @@ def find_duplicate_tracklets(tracklets: list[dict], observations: dict[Key, dict
             if min(overlaps) < settings.duplicate_min_iou * 0.85 or float(np.mean(overlaps)) < settings.duplicate_min_iou:
                 continue
             distances = []
-            for frame in short:
+            for frame in short if use_geometry else []:
                 p, q = _world(short[frame]), _world(long[frame])
                 if p is not None and q is not None:
                     distances.append(float(np.linalg.norm(p-q)))
@@ -161,7 +161,7 @@ def find_duplicate_tracklets(tracklets: list[dict], observations: dict[Key, dict
 
 def _boundary_compatible(earlier: dict, later: dict,
                          observations: dict[Key, dict[int, dict]], settings: RepairConfig,
-                         fps: float) -> tuple[bool, str, float | None]:
+                         fps: float, use_geometry: bool = True) -> tuple[bool, str, float | None]:
     gap = int(later["start_frame"]) - int(earlier["end_frame"])
     if gap < 1 or gap > settings.max_gap_frames:
         return False, "gap_outside_window", None
@@ -173,7 +173,7 @@ def _boundary_compatible(earlier: dict, later: dict,
     if not before or not after:
         return False, "missing_boundary_observations", None
     a = before[max(before)]; b = after[min(after)]
-    p, q = _world(a), _world(b)
+    p, q = (_world(a), _world(b)) if use_geometry else (None, None)
     if p is not None and q is not None:
         distance = float(np.linalg.norm(p-q))
         limit = settings.max_speed_mps * (gap / fps) + settings.position_slack_m
@@ -190,6 +190,8 @@ def _cross_camera_witness(older_group: set[Key], newcomer: dict,
                           by_key: dict[Key, dict], settings: RepairConfig,
                           cfg: Config) -> float | None:
     """Independent corroboration by ANOTHER camera at the newcomer's start."""
+    if not cfg.use_geometry:
+        return None
     newcomer_cam = int(newcomer["camera_id"])
     offsets = cfg.camera_offsets_s or {}
     positions = frames(newcomer)
@@ -222,6 +224,8 @@ def _unique_cross_camera_witness(older_group: set[Key], newcomer: dict,
     This guards against merging a nearby second person in crowded scenes.
     Requires synchronized projected positions; no geometry => no rescue.
     """
+    if not cfg.use_geometry:
+        return None, None
     newcomer_cam = int(newcomer["camera_id"])
     positions = frames(newcomer)
     first_frames = sorted(positions)[:5]
@@ -269,7 +273,7 @@ def relink_after_occlusion(tracklets: list[dict], mapping: dict[Key, int], cfg: 
             if sim is None or sim < min(settings.min_witnessed_similarity,
                                         settings.strong_witness_min_similarity):
                 continue
-            spatial_ok, kind, distance = _boundary_compatible(earlier, later, observations, settings, cfg.fps)
+            spatial_ok, kind, distance = _boundary_compatible(earlier, later, observations, settings, cfg.fps, cfg.use_geometry)
             if not spatial_ok:
                 continue
             a = (int(earlier["camera_id"]), int(earlier["local_id"]))
@@ -307,8 +311,7 @@ def relink_after_occlusion(tracklets: list[dict], mapping: dict[Key, int], cfg: 
             continue
         # Check every pair, not just the proposed edge, to avoid transitive
         # same-camera conflicts and physically impossible camera transitions.
-        if not all(_space_constraints(by_key[x], by_key[y], cfg)[0]
-                   for x in old_group for y in new_group):
+        if not groups_compatible([by_key[x] for x in old_group], [by_key[y] for y in new_group], cfg):
             journal.append({"older": list(a), "later": list(b), "decision": "rejected",
                             "reason": "component_conflict", "similarity": round(sim, 4)})
             continue

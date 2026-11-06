@@ -12,6 +12,51 @@ import numpy as np
 MAX_SAMPLES = 20
 
 
+def reliable_gallery(row: dict, count: int = 3) -> tuple[list, float]:
+    """Diverse high-quality prototypes; weak samples never enter the gallery.
+
+    Keep the all-observation mean as an anchor, instead of replacing it with
+    three individual crops (which regressed on the baseline experiment).
+    """
+    vectors = row.get("feature_vectors", [])
+    qualities = row.get("feature_quality", [])
+    if len(vectors) != len(qualities):
+        raise ValueError("feature vectors and qualities must align")
+    anchor = normalize(row.get("embedding", []))
+    if anchor.size and not np.isfinite(anchor).all():
+        return [], 0.0
+    valid = [(normalize(v), float(q)) for v, q in zip(vectors, qualities)
+             if len(v) and np.isfinite(v).all() and np.isfinite(q) and q > 0]
+    if not valid:
+        saved = row.get('prototypes') or ([anchor.tolist()] if anchor.size else [])
+        return saved[:count], float(row.get('gallery_reliability', 0.0))
+    best = max(q for _, q in valid)
+    pool = [(v, q) for v, q in valid if q >= max(0.15, best * 0.6)
+            and (not anchor.size or (v.shape == anchor.shape and v @ anchor >= 0.5))]
+    selected = [anchor] if anchor.size else []
+    while pool and len(selected) < count:
+        index = max(range(len(pool)), key=lambda i: pool[i][1] * (
+            min(1 - float(pool[i][0] @ p) for p in selected) if selected else 1))
+        vector, _ = pool.pop(index)
+        if not selected or max(float(vector @ p) for p in selected) < 0.995:
+            selected.append(vector)
+    reliability = min(1., best / 0.5) * min(1., len(valid) / 3)
+    return [v.tolist() for v in selected], float(reliability)
+
+
+def gallery_similarity(a: dict, b: dict) -> tuple[float | None, float]:
+    va, ra = reliable_gallery(a)
+    vb, rb = reliable_gallery(b)
+    if not va or not vb or len(va[0]) != len(vb[0]):
+        return None, 0.0
+    scores = np.asarray(va) @ np.asarray(vb).T
+    anchor = float(scores[0, 0])
+    # A single accidental high pair cannot dominate the mean anchor.
+    support = float((scores.max(axis=0).mean() + scores.max(axis=1).mean()) / 2)
+    reliability = min(ra, rb)
+    return float(np.clip(anchor + 0.25 * reliability * (support - anchor), -1, 1)), reliability
+
+
 def normalize(vector):
     vector = np.asarray(vector, dtype=np.float32)
     norm = float(np.linalg.norm(vector))
@@ -142,6 +187,58 @@ def analyze(tracklets_path: Path, labels_path: Path, output: Path):
     return report
 
 
+def enrich_temporal(tracklets, observations_path: Path, scene: Path, *,
+                    device='cuda:0', sample_every=5):
+    """Recover chronological samples from immutable cached boxes; no detector/GT.
+
+    Legacy caches kept only their 20 best crops, which can hide an ID switch.
+    Keep original mean/gallery intact so this is a controlled split ablation.
+    """
+    import copy
+    from .frame_sources import FrameSource
+    from .reid import ReID
+    from .weights import download_weights
+    if sample_every < 1:
+        raise ValueError('sample_every must be positive')
+    rows = copy.deepcopy(tracklets)
+    by_key = {(int(t['camera_id']), int(t['local_id'])): t for t in rows}
+    selected = {}
+    seen = set()
+    with observations_path.open(newline='', encoding='utf-8') as stream:
+        for obs in csv.DictReader(stream):
+            cam, lid, fid = (int(obs[k]) for k in ('camera_id', 'local_id', 'frame_id'))
+            if (cam, lid) not in by_key:
+                continue
+            if fid % sample_every == 0 or (cam, lid) not in seen:
+                selected.setdefault(cam, {}).setdefault(fid, []).append(obs)
+                seen.add((cam, lid))
+    model = ReID('osnet', device=device, weights=str(download_weights('osnet_x1_0')))
+    for t in rows:
+        t['temporal_frames'], t['temporal_vectors'] = [], []
+    for cam, by_frame in sorted(selected.items()):
+        with FrameSource(scene/'videos'/f'Camera_{cam:04d}.mp4') as source:
+            for fid, observations in sorted(by_frame.items()):
+                frame = source.get(fid)
+                if frame is None:
+                    raise RuntimeError(f'Missing camera {cam} frame {fid}')
+                crops, keys = [], []
+                for obs in observations:
+                    x1, y1, x2, y2 = [int(float(obs[k])) for k in ('x1', 'y1', 'x2', 'y2')]
+                    crop = frame[max(0,y1):min(frame.shape[0],y2), max(0,x1):min(frame.shape[1],x2)]
+                    if crop.size:
+                        crops.append(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+                        keys.append((cam, int(obs['local_id'])))
+                for key, vector in zip(keys, model.encode(crops)):
+                    t = by_key[key]
+                    t['temporal_frames'].append(fid)
+                    t['temporal_vectors'].append(vector.tolist())
+                    if len(t['temporal_frames']) > 256:
+                        t['temporal_frames'] = t['temporal_frames'][::2]
+                        t['temporal_vectors'] = t['temporal_vectors'][::2]
+        print(f'Temporal features camera {cam} complete', flush=True)
+    return rows
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
@@ -151,9 +248,17 @@ def main():
     parser.add_argument("--prototypes", type=int, default=3)
     parser.add_argument("--labels", type=Path, help="Analysis-only GT labels")
     parser.add_argument("--analysis-out", type=Path)
+    parser.add_argument('--temporal-observations', type=Path)
+    parser.add_argument('--scene-dir', type=Path)
     args = parser.parse_args()
     rows = json.loads(args.input.read_text(encoding="utf-8"))
-    args.output.write_text(json.dumps(apply_policy(rows, args.policy, args.top_k, args.prototypes)), encoding="utf-8")
+    if args.temporal_observations:
+        if not args.scene_dir:
+            parser.error('--temporal-observations requires --scene-dir')
+        output = enrich_temporal(rows, args.temporal_observations, args.scene_dir)
+    else:
+        output = apply_policy(rows, args.policy, args.top_k, args.prototypes)
+    args.output.write_text(json.dumps(output), encoding="utf-8")
     if args.labels and args.analysis_out:
         print(json.dumps(analyze(args.output, args.labels, args.analysis_out), indent=2))
 

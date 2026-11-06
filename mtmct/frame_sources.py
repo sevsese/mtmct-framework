@@ -67,22 +67,27 @@ class FrameSource:
             self._cursor += 1
         return frame if ok else None
 
-    def iter_frames(self, max_frames: int, stride: int = 1):
-        if stride < 1:
-            raise ValueError('stride must be >= 1')
+    def iter_frames(self, max_frames: int, stride: int = 1, start_frame: int = 0):
+        if stride < 1 or start_frame < 0:
+            raise ValueError('stride must be >= 1 and start_frame >= 0')
         if self.images is not None:
             for fid in sorted(self.images):
-                if (max_frames > 0 and fid >= max_frames) or fid % stride != 0:
+                if fid < start_frame or (max_frames > 0 and fid >= max_frames) or fid % stride != 0:
                     continue
                 frame = self.get(fid)
                 if frame is None:
                     raise RuntimeError(f'Unreadable image: {self.images[fid]}')
                 yield fid, frame
             return
-        fid = 0
+        fid = start_frame
+        expected_end = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
+        if max_frames > 0:
+            expected_end = min(expected_end, max_frames) if expected_end else max_frames
         while max_frames <= 0 or fid < max_frames:
             frame = self.get(fid)
             if frame is None:
+                if fid < expected_end:
+                    raise RuntimeError(f'Premature video EOF at {fid}, expected {expected_end}: {self.path}')
                 break
             if fid % stride == 0:
                 yield fid, frame

@@ -89,3 +89,11 @@ def test_empty_gt_and_predictions_are_deterministic(tmp_path):
         "IDTP": 0, "IDFP": 0, "IDFN": 0, "IDP": 1.0, "IDR": 1.0,
         "IDF1": 1.0, "gt_count": 0, "pred_count": 0,
     }
+
+
+def test_interval_excludes_previous_frames_without_renumbering(tmp_path):
+    gt, predictions = tmp_path/'gt.json', tmp_path/'pred.csv'
+    write_gt(gt, [(0, 0, 1, [0, 0, 10, 10]), (900, 0, 2, [0, 0, 10, 10])])
+    write_predictions(predictions, [(900, 0, 7, [0, 0, 10, 10])])
+    result = eval_2d(predictions, gt, [0], max_frames=901, start_frame=900)
+    assert result['global']['IDF1'] == 1 and result['gt_count'] == 1

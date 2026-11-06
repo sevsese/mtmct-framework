@@ -5,7 +5,7 @@ re-checked *across all members* before any union, preventing contradictory
 transitive merges (same camera / time, implausible physical separation).
 """
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 from typing import Any
@@ -39,7 +39,22 @@ def unit(v: list[float] | np.ndarray) -> np.ndarray:
 
 
 def frames(t: dict) -> dict[int, tuple[float,float]]:
-    return {int(p[0]): (float(p[1]), float(p[2])) for p in t.get("positions", [])}
+    return {int(p[0]): (float(p[1]), float(p[2])) for p in t.get("positions", [])
+            if int(t["start_frame"]) <= int(p[0]) <= int(t["end_frame"])
+            and np.isfinite(p[1:3]).all()}
+
+
+def hard_compatible(a: dict, b: dict, cfg: Config) -> bool:
+    """Physical veto shared by association, memory, correction and repair.
+
+    An unmeasured long absence is unknown, not physically impossible. The
+    baseline's max_gap remains a candidate-search policy, not a memory veto.
+    """
+    return _space_constraints(a, b, replace(cfg, max_gap_seconds=float("inf")))[0]
+
+
+def groups_compatible(left, right, cfg: Config) -> bool:
+    return all(hard_compatible(a, b, cfg) for a in left for b in right)
 
 
 def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, float]:
@@ -71,6 +86,13 @@ def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, floa
             return False, 0.0, 1.0
         return True, 0.0, min(gap / cfg.max_gap_seconds, 1.0)
     if overlapping:
+        # Align physical times, including per-camera FPS and clock offsets.
+        offsets = cfg.camera_offsets_s or {}
+        def timed(row, points):
+            fps = float(row.get("fps", cfg.fps))
+            offset = track_times(row, cfg.fps, offsets)[0] - float(row['start_frame']) / fps
+            return {round((f / fps + offset) * 1000000): p for f, p in points.items()}
+        pa, pb = timed(a, pa), timed(b, pb)
         common = sorted(set(pa).intersection(pb))
         if common:
             distances = [float(np.linalg.norm(np.subtract(pa[f], pb[f]))) for f in common]

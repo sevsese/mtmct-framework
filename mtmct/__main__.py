@@ -37,7 +37,10 @@ def main():
     p.add_argument("--max-cost",type=float,default=0.125)
     p.add_argument("--geometry",action="store_true",help="Use validated floor geometry")
     p.add_argument("--time",action="store_true",help="Enable time constraints for graph matcher")
-    p.add_argument("--matcher",choices=["baseline","graph"],default="baseline")
+    p.add_argument("--matcher",choices=["baseline","graph","adaptive"],default="baseline")
+    p.add_argument("--memory-mode",choices=["legacy","constrained","gallery"],default="legacy")
+    p.add_argument("--split-tracklets",action="store_true")
+    p.add_argument("--memory-state",type=Path)
     p.add_argument("--memory",action="store_true")
     p.add_argument("--memory-similarity",type=float,default=0.90)
     p.add_argument("--camera-offset",action="append",default=[],metavar="CAMERA=SECONDS")
@@ -87,7 +90,7 @@ def main():
     cfg=Config(appearance_weight=0.95,spatial_weight=0.0 if not a.geometry else 0.20,
                temporal_weight=0.05,max_cost=a.max_cost,
                min_similarity=a.min_similarity,use_geometry=a.geometry,
-               use_time=True if a.matcher=="baseline" else a.time,
+               use_time=True if a.matcher in {"baseline", "adaptive"} else a.time,
                camera_offsets_s=parse_offsets(a.camera_offset),
                transition_model=CameraTransitionModel.from_json(a.topology) if a.topology else None)
     if a.matcher=="graph" and not a.time:
@@ -96,12 +99,13 @@ def main():
         out,cfg,expected_detector=None if a.link_only else a.model,matcher=a.matcher,
         memory=a.memory,memory_similarity=a.memory_similarity,
         correct_identities=a.correct_identities,
-        repair_occlusions=a.repair_occlusions)
+        repair_occlusions=a.repair_occlusions,memory_mode=a.memory_mode,
+        split_tracklets=a.split_tracklets,memory_state=a.memory_state)
     if not a.link_only or a.render_link_only:
         render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
     cross=sum(len({c for c,l in mapping if mapping[(c,l)]==gid})>1
               for gid in set(mapping.values()))
-    accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher=="graph" else len(edges)
+    accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher!="baseline" else len(edges)
     print(f"DONE: {len(tracklets)} local tracks, {accepted} accepted edges, "
           f"{cross} cross-camera global IDs")
     if not a.link_only or a.render_link_only:

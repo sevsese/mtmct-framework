@@ -51,8 +51,9 @@ def parse_offsets(values: list[str] | None) -> dict[int, float]:
 
 
 def track_times(tracklet: dict, fps: float, offsets: dict[int, float] | None = None):
-    if "start_s" in tracklet and "end_s" in tracklet:
-        return float(tracklet["start_s"]), float(tracklet["end_s"])
     offset = (offsets or {}).get(int(tracklet["camera_id"]), 0.0)
+    if "start_s" in tracklet and "end_s" in tracklet:
+        return float(tracklet["start_s"]) + offset, float(tracklet["end_s"]) + offset
+    fps = float(tracklet.get("fps", fps))
     return (float(tracklet["start_frame"]) / fps + offset,
             float(tracklet["end_frame"]) / fps + offset)

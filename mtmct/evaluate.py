@@ -101,13 +101,15 @@ def _pairwise_metrics(matched_by_camera: dict[int, Counter]):
 
 
 def eval_2d(pred_path: Path, gt_path: Path, cameras: list[int],
-            max_frames: int, stride: int = 1, threshold: float = 0.5):
+            max_frames: int, stride: int = 1, threshold: float = 0.5, start_frame: int = 0):
     if max_frames <= 0 or stride <= 0:
         raise ValueError("Use finite positive --max-frames and --stride")
     if not 0 <= threshold <= 1:
         raise ValueError("IoU threshold must be between 0 and 1")
+    if not 0 <= start_frame < max_frames:
+        raise ValueError("start_frame must be within the evaluation interval")
     cameras = sorted(set(cameras))
-    selected_frames = set(range(0, max_frames, stride))
+    selected_frames = set(range(start_frame, max_frames, stride))
     selected_keys = {(frame, camera) for frame in selected_frames for camera in cameras}
 
     predictions = defaultdict(list)
@@ -163,6 +165,7 @@ def eval_2d(pred_path: Path, gt_path: Path, cameras: list[int],
         "official_nvidia_3d_hota": False,
         "iou_threshold": threshold,
         "max_frames": max_frames,
+        "start_frame": start_frame,
         "stride": stride,
         "cameras": cameras,
         "global": global_metrics,

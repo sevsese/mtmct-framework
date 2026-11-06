@@ -13,13 +13,26 @@ from .features import normalize
 
 
 def diagnose(tracklets: list[dict], split_similarity: float = 0.5,
-             merge_similarity: float = 0.9, max_gap_frames: int = 90) -> dict:
+             merge_similarity: float = 0.9, max_gap_frames: int = 90,
+             sustained_samples: int = 1) -> dict:
+    if sustained_samples < 1:
+        raise ValueError('sustained_samples must be positive')
     splits = []
     for index, tracklet in enumerate(tracklets):
-        samples = sorted(zip(tracklet.get("feature_frames", []),
-                             tracklet.get("feature_vectors", [])))
-        for (left_frame, left), (right_frame, right) in zip(samples, samples[1:]):
+        samples = sorted(zip(tracklet.get("temporal_frames", tracklet.get("feature_frames", [])),
+                             tracklet.get("temporal_vectors", tracklet.get("feature_vectors", []))))
+        for boundary in range(sustained_samples, len(samples) - sustained_samples + 1):
+            left_frame, left = samples[boundary - 1]
+            right_frame, right = samples[boundary]
             similarity = float(normalize(left) @ normalize(right))
+            if sustained_samples > 1:
+                before = [normalize(v) for _, v in samples[boundary-sustained_samples:boundary]]
+                after = [normalize(v) for _, v in samples[boundary:boundary+sustained_samples]]
+                # Require two internally coherent runs, not one corrupt crop.
+                left_mean, right_mean = normalize(np.mean(before, axis=0)), normalize(np.mean(after, axis=0))
+                if min(float(v @ left_mean) for v in before) < 0.8 or min(float(v @ right_mean) for v in after) < 0.8:
+                    continue
+                similarity = float(left_mean @ right_mean)
             if similarity < split_similarity:
                 splits.append({"index": index, "camera_id": tracklet["camera_id"],
                                "local_id": tracklet["local_id"], "split_frame": right_frame,
@@ -45,9 +58,9 @@ def diagnose(tracklets: list[dict], split_similarity: float = 0.5,
 
 def refine(tracklets: list[dict], *, auto_split: bool = False, auto_merge: bool = False,
            split_similarity: float = 0.5, merge_similarity: float = 0.9,
-           max_gap_frames: int = 90):
+           max_gap_frames: int = 90, sustained_samples: int = 1):
     original = copy.deepcopy(tracklets)
-    report = diagnose(original, split_similarity, merge_similarity, max_gap_frames)
+    report = diagnose(original, split_similarity, merge_similarity, max_gap_frames, sustained_samples)
     if not auto_split and not auto_merge:
         return original, report, []
     next_id = {}
@@ -72,14 +85,27 @@ def refine(tracklets: list[dict], *, auto_split: bool = False, auto_merge: bool 
                                      (frame, source["end_frame"], next_id[source["camera_id"]])):
             part = copy.deepcopy(row)
             part["local_id"], part["start_frame"], part["end_frame"] = local_id, start, end
+            part['tracklet_uid'] = f"{row.get('tracklet_uid', str(source['camera_id']) + ':' + str(source['local_id']))}:{start}-{end}"
+            part['positions'] = [p for p in row.get('positions', []) if start <= p[0] <= end]
+            fps = float(row.get('fps', 30.))
+            offset = float(row.get('start_s', source['start_frame'] / fps)) - source['start_frame'] / fps
+            part['start_s'], part['end_s'] = start / fps + offset, end / fps + offset
+            part['prototypes'] = []
+            for prefix in ('temporal',):
+                temporal = [(f, v) for f, v in zip(row.get(prefix+'_frames', []), row.get(prefix+'_vectors', [])) if start <= f <= end]
+                part[prefix+'_frames'] = [f for f, _ in temporal]
+                part[prefix+'_vectors'] = [v for _, v in temporal]
             selected = [sample_index for sample_index, sample_frame in enumerate(row.get("feature_frames", []))
                         if start <= sample_frame <= end]
             part["feature_frames"] = [row["feature_frames"][i] for i in selected]
             part["feature_vectors"] = [row["feature_vectors"][i] for i in selected]
             part["feature_quality"] = [row.get("feature_quality", [1] * len(row.get("feature_frames", [])))[i]
                                        for i in selected]
-            if part["feature_vectors"]:
-                part["embedding"] = normalize(np.mean([normalize(v) for v in part["feature_vectors"]], axis=0)).tolist()
+            if 'foreground_ratio' in row:
+                part['foreground_ratio'] = [row['foreground_ratio'][i] for i in selected]
+            vectors = part['temporal_vectors'] or part['feature_vectors']
+            part['samples'] = len(vectors)
+            part['embedding'] = normalize(np.mean([normalize(v) for v in vectors], axis=0)).tolist() if vectors else []
             part["provenance"] = [{**source, "segment_start": start, "segment_end": end}]
             parts.append(part)
             remap.append({**source, "start_frame": start, "end_frame": end,
@@ -101,6 +127,13 @@ def refine(tracklets: list[dict], *, auto_split: bool = False, auto_merge: bool 
             primary["end_frame"] = max(int(left["end_frame"]), int(right["end_frame"]))
             primary["embedding"] = normalize(np.mean([normalize(left["embedding"]), normalize(right["embedding"])], axis=0)).tolist()
             primary["provenance"] = left.get("provenance", []) + right.get("provenance", [])
+            for name in ('positions', 'feature_frames', 'feature_vectors', 'feature_quality', 'temporal_frames', 'temporal_vectors', 'foreground_ratio'):
+                primary[name] = left.get(name, []) + right.get(name, [])
+            primary['positions'] = sorted(primary['positions'], key=lambda p: p[0])
+            primary['samples'] = int(left.get('samples', 0)) + int(right.get('samples', 0))
+            primary['start_s'] = min(float(t.get('start_s', t['start_frame']/float(t.get('fps', 30)))) for t in (left, right))
+            primary['end_s'] = max(float(t.get('end_s', t['end_frame']/float(t.get('fps', 30)))) for t in (left, right))
+            primary['prototypes'] = []
             for item in remap:
                 if item["camera_id"] == int(secondary["camera_id"]) and item["new_local_id"] == int(secondary["local_id"]):
                     item["new_local_id"] = int(primary["local_id"])

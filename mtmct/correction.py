@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 
-from .association import Config, pair_score
+from .association import Config, hard_compatible, pair_score
 
 
 def rebuild(tracklets: list[dict], journal: list[dict], cfg: Config):
@@ -32,7 +32,8 @@ def rebuild(tracklets: list[dict], journal: list[dict], cfg: Config):
         for left in members[left_root]:
             for right in members[right_root]:
                 score = pair_score(tracklets[left], tracklets[right], cfg)
-                if score["cost"] is None or score["cost"] > cfg.max_cost:
+                if (not hard_compatible(tracklets[left], tracklets[right], cfg)
+                        or score["cost"] is None or score["cost"] > cfg.max_cost):
                     incompatible.append({"i": left, "j": right, "reason": score["reason"],
                                          "similarity": score["similarity"]})
         if incompatible:

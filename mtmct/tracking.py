@@ -25,7 +25,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
         max_frames: int, stride: int, sample_every: int,
         imgsz: int, conf: float, reid_model: str = "osnet_x1_0",
         cameras: list[int] | None = None, tracker: str | Path = "bytetrack.yaml",
-        camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0):
+        camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0,
+        start_frame: int = 0):
     from ultralytics import YOLO
     if stride<1 or sample_every<1:
         raise ValueError("stride and sample_every must be positive")
@@ -70,7 +71,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
             # id -> data. Only a sum and count for embeddings, not every crop.
             by_id=defaultdict(lambda: {"start_frame":10**12,"end_frame":-1,
                                        "positions":[],"embedding_sum":None,"samples":0,
-                                       "feature_samples":[]})
+                                       "feature_samples":[], "temporal_samples":[]})
             fid=0
             processed=0
             if device.startswith("cuda"):
@@ -79,7 +80,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
                 torch.cuda.reset_peak_memory_stats()
             started=time.perf_counter()
             try:
-                for fid, frame in reader.iter_frames(max_frames, stride):
+                for fid, frame in reader.iter_frames(max_frames, stride, start_frame):
                     result=model.track(frame,persist=True,tracker=str(tracker),
                                        classes=[0],conf=conf,imgsz=imgsz,
                                        device=device,verbose=False)[0]
@@ -123,6 +124,9 @@ def run(scene_dir: Path, output: Path, model_name: str,
                             row["embedding_sum"]=np.zeros_like(e,dtype=np.float64)
                         row["embedding_sum"]+=e
                         row["samples"]+=1
+                        row['temporal_samples'].append((fid, e.tolist()))
+                        if len(row['temporal_samples']) > 256:
+                            row['temporal_samples'] = row['temporal_samples'][::2]
                         row["feature_samples"].append((quality,fid,e.tolist()))
                         row["feature_samples"] = sorted(
                             row["feature_samples"], key=lambda sample: -sample[0])[:MAX_SAMPLES]
@@ -143,6 +147,10 @@ def run(scene_dir: Path, output: Path, model_name: str,
             for lid,track in by_id.items():
                 emb=track["embedding_sum"]
                 summaries.append({"camera_id":cam,"local_id":lid,
+                                  "tracklet_uid":f"{scene_dir.name}:{cam}:{lid}:{track['start_frame']}",
+                                  "start_s":track["start_frame"]/video_fps,
+                                  "end_s":track["end_frame"]/video_fps,
+                                  "fps":video_fps,
                                   "start_frame":int(track["start_frame"]),
                                   "end_frame":int(track["end_frame"]),
                                   "positions":track["positions"],
@@ -150,8 +158,12 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                   "feature_quality":[sample[0] for sample in track["feature_samples"]],
                                   "feature_frames":[sample[1] for sample in track["feature_samples"]],
                                   "feature_vectors":[sample[2] for sample in track["feature_samples"]],
+                                  "temporal_frames":[sample[0] for sample in track['temporal_samples']],
+                                  "temporal_vectors":[sample[1] for sample in track['temporal_samples']],
                                   "samples":track["samples"]})
             del model
+            import gc
+            gc.collect()
             if device.startswith("cuda"):
                 import torch
                 torch.cuda.empty_cache()
@@ -168,7 +180,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
         inputs=[*( [calibration_path] if calibration_path.is_file() else [] ), *source_paths.values()],
         detector=model_name, reid=reid_weights or reid_method,
         feature_dimension=next(iter(dimensions), None),
-        config={"max_frames":max_frames,"stride":stride,"sample_every":sample_every,
+        config={"max_frames":max_frames,"start_frame":start_frame,"stride":stride,"sample_every":sample_every,
                 "imgsz":imgsz,"conf":conf,"tracker":str(tracker),"reid_method":reid_method,
                 "reid_model":reid_model,"camera_sources":{str(c):str(p) for c,p in source_paths.items()},
                 "fps_fallback":fps_fallback},
@@ -186,6 +198,7 @@ def main():
     p.add_argument("--reid-model",choices=["osnet_x0_25","osnet_x0_75","osnet_x1_0"],default="osnet_x1_0")
     p.add_argument("--device",default="cuda:0",help="cpu or cuda:0")
     p.add_argument("--max-frames",type=int,default=300,help="0 = all frames")
+    p.add_argument("--start-frame",type=int,default=0)
     p.add_argument("--stride",type=int,default=1)
     p.add_argument("--sample-every",type=int,default=5)
     p.add_argument("--imgsz",type=int,default=1536)
@@ -195,6 +208,6 @@ def main():
     a=p.parse_args()
     run(a.scene_dir,a.out,a.model,a.reid,a.reid_weights,a.device,
         a.max_frames,a.stride,a.sample_every,a.imgsz,a.conf,
-        reid_model=a.reid_model,cameras=a.cameras,tracker=a.tracker)
+        reid_model=a.reid_model,cameras=a.cameras,tracker=a.tracker,start_frame=a.start_frame)
 
 if __name__=="__main__":main()
