@@ -30,8 +30,12 @@ def distinct_crop_boxes(full, crop):
     distance = np.linalg.norm(part_foot[:, None] - whole_foot[None], axis=2)
     smaller_height = np.minimum((part[:, 3] - part[:, 1])[:, None],
                                 (whole[:, 3] - whole[:, 1])[None, :])
+    # Upper-body crops have a different foot point but the same top as the
+    # full person. Remove these before NMS can replace the complete box.
+    aligned_top = np.abs(part[:, None, 1] - whole[None, :, 1]) <= .15 * np.maximum(
+        (part[:, 3]-part[:, 1])[:, None], (whole[:, 3]-whole[:, 1])[None, :])
     duplicate = (smaller_area > 0) & (intersection >= .85 * smaller_area) & (
-        distance <= .15 * smaller_height
+        (distance <= .15 * smaller_height) | aligned_top
     )
     return crop[~duplicate.any(axis=1)]
 
@@ -43,6 +47,24 @@ def filter_person_size(boxes, shape, minimum):
     h, w = shape[:2]
     return boxes[((boxes[:, 2]-boxes[:, 0]) >= minimum[0]*w) &
                  ((boxes[:, 3]-boxes[:, 1]) >= minimum[1]*h)]
+
+
+def suppress_body_parts(boxes):
+    """Keep full people instead of contained head/torso detections."""
+    keep = []
+    areas = np.maximum(0, boxes[:, 2:4]-boxes[:, :2]).prod(axis=1)
+    for i in np.argsort(-areas):
+        box = boxes[i]
+        duplicate = False
+        for j in keep:
+            other = boxes[j]
+            overlap = np.maximum(0, np.minimum(box[2:4], other[2:4])-np.maximum(box[:2], other[:2])).prod()
+            if areas[i] > 0 and overlap >= .95*areas[i]:
+                duplicate = True
+                break
+        if not duplicate:
+            keep.append(i)
+    return boxes[sorted(keep)]
 
 
 class ZoomTracker:
@@ -92,7 +114,7 @@ class ZoomTracker:
             foot_y = combined[:,3]
             combined = combined[~((foot_x >= left) & (foot_x <= right) &
                                   (foot_y >= top) & (foot_y <= bottom))]
-        combined = filter_person_size(combined, frame.shape, self.minimum)
+        combined = suppress_body_parts(filter_person_size(combined, frame.shape, self.minimum))
         self.zoom_seconds += time.perf_counter()-started
         for name,boxes in (("full",full),("fused",combined)):
             for box in boxes:
