@@ -14,6 +14,8 @@ def build_global_track_report(tracklets: list[dict], mapping: dict[tuple[int, in
     groups = defaultdict(list)
     for row in tracklets:
         key = (int(row["camera_id"]), int(row["local_id"]))
+        if key not in mapping:
+            continue  # Association may suppress unconfirmed short tracklets.
         start, end = track_times(row, fps, offsets)
         groups[int(mapping[key])].append({
             "camera_id": key[0], "local_id": key[1],
