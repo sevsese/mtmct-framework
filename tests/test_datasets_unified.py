@@ -42,6 +42,21 @@ def test_frame_source_selects_sparse_real_frame_ids(tmp_path):
         assert [fid for fid, _ in src.iter_frames(0, frame_ids={5})] == [5]
 
 
+def test_video_buffer_reuse_preserves_frame_contents(tmp_path):
+    path = tmp_path/"camera.mp4"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 25., (64,48))
+    for value in (30, 90, 150):
+        writer.write(np.full((48,64,3), value, dtype=np.uint8))
+    writer.release()
+    with FrameSource(path) as reference, FrameSource(path, reuse_buffer=True) as source:
+        frames = source.iter_frames(3, stride=2)
+        index, first = next(frames)
+        assert index == 0 and np.array_equal(first, reference.get(0))
+        index, last = next(frames)
+        assert index == 2 and np.array_equal(last, reference.get(2))
+        assert np.shares_memory(first, last)
+
+
 def test_render_sparse_image_frame_ids(tmp_path):
     import csv
     for cam in (0, 1):

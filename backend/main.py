@@ -449,7 +449,8 @@ def run_job(identifier, options):
     d = dataset(identifier)
     out = owned/'result'
     try:
-        spec = {'scene': d['source'], 'output': str(out), 'cameras': d['cameras'], 'options': options}
+        spec = {'scene': d['source'], 'output': str(out), 'cameras': d['cameras'],
+                'options': options | {'resume': True}}
         save(owned/'worker.json',spec)
         job.update(status='running', started_at=now(), phase='tracking')
         save(owned/'job.json',job)

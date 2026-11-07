@@ -24,10 +24,13 @@ def image_number(path: Path) -> int:
 
 
 class FrameSource:
-    def __init__(self, path: str | Path, fps: float = 30.0):
+    def __init__(self, path: str | Path, fps: float = 30.0, *, reuse_buffer: bool = False):
         self.path = Path(path)
         self.video = None
         self.fps = float(fps)
+        # Opt in only when the caller finishes using each frame before advancing.
+        self._reuse_buffer = reuse_buffer
+        self._buffer = None
         if self.path.is_dir():
             self.images = {}
             for file in self.path.iterdir():
@@ -67,9 +70,11 @@ class FrameSource:
             if not self.video.grab():
                 return None
             self._cursor += 1
-        ok, frame = self.video.read()
+        ok, frame = self.video.read() if self._buffer is None else self.video.read(self._buffer)
         if ok:
             self._cursor += 1
+            if self._reuse_buffer:
+                self._buffer = frame
         return frame if ok else None
 
     def iter_frames(self, max_frames: int, stride: int = 1,
@@ -125,6 +130,7 @@ class FrameSource:
         return f.shape[1], f.shape[0]
 
     def close(self):
+        self._buffer = None
         if self.video is not None:
             self.video.release()
 

@@ -9,7 +9,7 @@ from pathlib import Path
 import ijson
 
 from backend.adapter import office_camera_ids
-from mtmct.cache import write_config
+from mtmct.cache import fingerprint, validate_cache, write_config
 from run_hackaton_experiment import (
     CONF, EXCLUDE_ROIS, FRAME_STRIDE, GALLERY_WEIGHT, GLOBAL_MAX_GAP_SECONDS,
     IMGSZ, MIN_OBSERVATIONS, MIN_SIMILARITY, MODEL, PART_WEIGHT, REID_MODEL,
@@ -64,6 +64,37 @@ def track_camera(spec, camera):
     )
 
 
+def camera_cache_matches(part, camera, options, expected):
+    files = ("manifest.json", "performance.json", "observations.csv", "local_tracklets.json")
+    if not all((part / name).is_file() for name in files):
+        return False
+    try:
+        manifest = validate_cache(part)
+        camera_id = str(camera["camera_id"])
+        saved = manifest["tracking_config"]
+        expected = json.loads(json.dumps(expected))
+        model = manifest["models"]["detector"]
+        reid = manifest["models"]["reid"]
+        limit = frame_limit(options, camera)
+        source = str(Path(camera["path"]).resolve())
+        performance = json.loads((part/"performance.json").read_text(encoding="utf-8"))
+        return (
+            all(saved.get(key) == value for key, value in expected.items())
+            and saved.get("max_frames") == limit
+            and str(Path(saved["camera_sources"][camera_id]).resolve()) == source
+            and any(item["path"] == source for item in manifest["inputs"])
+            and model["sha256"] == fingerprint(ROOT / MODEL)["sha256"]
+            and reid["sha256"] == fingerprint(reid["path"])["sha256"]
+            and len(performance) == 1
+            and performance[0]["camera_id"] == camera["camera_id"]
+            and performance[0]["processed_frames"] > 0
+            and (not limit or performance[0]["processed_frames"] >=
+                 math.ceil(min(limit, round(camera["duration"] * camera["fps"])) / expected["stride"]))
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def merge_camera_outputs(output, parts):
     for name in ("local_tracklets.json", "performance.json"):
         with (output / name).open("w", encoding="utf-8") as destination:
@@ -113,16 +144,11 @@ def main():
     for camera in cameras:
         part = output / f"camera_{camera['camera_id']}"
         expected = tracking_config(camera["camera_id"], office_ids.get(camera["camera_id"]))
-        reusable = False
-        if options.get("resume") and all((part / name).is_file() for name in (
-            "manifest.json", "performance.json", "observations.csv", "local_tracklets.json"
-        )):
-            from mtmct.cache import validate_cache
-            saved = validate_cache(part)["tracking_config"]
-            reusable = all(saved.get(key) == value for key, value in expected.items())
+        reusable = options.get("resume") and camera_cache_matches(part, camera, options, expected)
         if reusable:
             print(f"Reusing completed camera {camera['camera_id']}", flush=True)
         else:
+            (part/"manifest.json").unlink(missing_ok=True)
             print(f"STAGE tracking: camera {camera['camera_id']} ({len(parts) + 1}/{len(cameras)})", flush=True)
             subprocess.run(
                 [sys.executable, "-u", "-m", "backend.worker", str(spec_path), str(camera["camera_id"])],

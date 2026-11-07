@@ -68,7 +68,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
             H = calibration.get(cam)
             if H is None:
                 print(f'Camera {cam}: no verified floor projection; using appearance-only positions')
-            reader = FrameSource(video, fps=fps_fallback)
+            reader = FrameSource(video, fps=fps_fallback, reuse_buffer=True)
             model = YOLO(model_name)  # independent ByteTrack instance per camera
             print(f'Processing camera {cam}: {video}', flush=True)
             video_fps = reader.fps
