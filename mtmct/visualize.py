@@ -46,6 +46,7 @@ def render(scene_dir: Path, predictions: Path, output: Path,
     with ExitStack() as stack:
         readers = {cam: stack.enter_context(FrameSource(sources[cam], fps_fallback))
                    for cam in selected}
+        previous_frames = {}
         base_w, base_h = next(iter(readers.values())).dimensions()
         w, h = max(1, int(base_w * scale)), max(1, int(base_h * scale))
         cols = ceil(sqrt(len(selected)))
@@ -77,7 +78,12 @@ def render(scene_dir: Path, predictions: Path, output: Path,
                                  if duration_seconds is not None else frame_id)
                     if duration_seconds is not None:
                         source_id = round(source_id / stride) * stride
-                    frame = reader.get(source_id) if source_id>=0 and local_time>=0 else None
+                    previous_id, previous_frame = previous_frames.get(cam, (None, None))
+                    if source_id == previous_id:
+                        frame = previous_frame.copy() if previous_frame is not None else None
+                    else:
+                        frame = reader.get(source_id) if source_id>=0 and local_time>=0 else None
+                        previous_frames[cam] = (source_id, frame.copy() if frame is not None else None)
                     if frame is not None:
                         any_frame = True
                         for r in tracks.get((cam, source_id), []):
