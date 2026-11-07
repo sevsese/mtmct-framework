@@ -56,7 +56,7 @@ function CameraPanel({camera,dataset,clock,playing,boxes,globalId,onError}:{came
 export function Viewer({id}:{id:string}){
   const {data:cameras,error}=useApi<Camera[]>(`/api/datasets/${id}/cameras`);const [params]=useSearchParams();
   const {data:details}=useApi(`/api/datasets/${id}`);
-  const [clock,setClock]=useState(Number(params.get('time')||0)),[playing,setPlaying]=useState(false),[boxes,setBoxes]=useState(true),[selected,setSelected]=useState<string[]>([]),[columns,setColumns]=useState('2'),[failure,setFailure]=useState('');
+  const [clock,setClock]=useState(Number(params.get('time')||0)),[playing,setPlaying]=useState(false),[boxes,setBoxes]=useState(true),[selected,setSelected]=useState<string[]>([]),[columns,setColumns]=useState('3'),[failure,setFailure]=useState('');
   const [gid,setGid]=useState<number|string>(params.get('global')??'');const clockRef=useRef(clock);clockRef.current=clock;
   const max=Math.max(1,...(cameras||[]).map(c=>(c.duration??0)+(c.offset??0))),min=Math.min(0,...(cameras||[]).map(c=>c.offset??0));
   useEffect(()=>{if(!playing)return;let raf=0;let last=performance.now(),lastUpdate=last;const tick=(now:number)=>{clockRef.current+=Math.min((now-last)/1000,.25);last=now;if(clockRef.current>=max){clockRef.current=max;setPlaying(false);}if(now-lastUpdate>=60){setClock(clockRef.current);lastUpdate=now;}raf=requestAnimationFrame(tick)};raf=requestAnimationFrame(tick);return()=>cancelAnimationFrame(raf)},[playing,max]);

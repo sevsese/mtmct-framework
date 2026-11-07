@@ -67,6 +67,19 @@ def test_real_result_adapter(client):
     assert response.status_code==206 and len(response.content)==32
     obs=client.get(base+'/observations?camera_id=3&frame_id=0').json()['items']
     assert obs[0]['timestamp']==0 and obs[0]['bbox']==[1534.74,654.19,1638.93,1023.2]
+    import cv2
+    import numpy as np
+    png=cv2.imencode('.png',np.full((100,100,3),240,dtype=np.uint8))[1].tobytes()
+    assert client.post(base+'/floorplan',files={'file':('plan.png',png,'image/png')}).status_code==200
+    pairs=[{'video':[x,y],'plan':[x,y]} for x,y in [(0,0),(1,0),(1,1),(0,1)]]
+    assert client.put(base+'/floorplan/calibration/3',json=pairs).status_code==200
+    route=client.get(base+'/floorplan/trajectories?start=0&end=1').json()
+    assert route['kind']=='manual_estimate' and route['points']
+    assert all(p['camera_id']==3 for p in route['points'])
+    assert client.get(base+'/frame/3?time=0').headers['content-type']=='image/jpeg'
+    assert client.get(base+'/floorplan/trajectories?end=121').status_code==422
+    assert client.post(base+'/floorplan',files={'file':('new.png',png,'image/png')}).status_code==200
+    assert client.get(base+'/floorplan').json()['calibrated'] is False
 
 
 def test_optional_floorplan_and_json_shape_validation(client):

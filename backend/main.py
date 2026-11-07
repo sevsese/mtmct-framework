@@ -13,10 +13,11 @@ import uuid
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 from backend.adapter import ROOT, ARTIFACTS, build_index, read_json, rows, observation_dto, video_info
+from backend.floor_map import fit as fit_floor, project as project_floor
 
 STORE = Path(os.environ.get('MTMCT_WEB_STORE', ROOT/'data/web')).resolve()
 STORE.mkdir(parents=True, exist_ok=True)
@@ -401,6 +402,7 @@ async def floor_upload(identifier: str, file: UploadFile = File(...)):
     if image is None:
         raise HTTPException(422,'Повреждённое изображение')
     (directory(identifier)/'floorplan.png').write_bytes(cv2.imencode('.png',image)[1].tobytes())
+    save(directory(identifier)/'floor_calibration.json',{})
     return {'status':'ok'}
 
 
@@ -421,7 +423,9 @@ class Marker(BaseModel):
 def floor_info(identifier: str):
     dataset(identifier)
     return {'available': (directory(identifier)/'floorplan.png').exists(),
-            'markers': read_json(directory(identifier),'markers.json',[]), 'calibrated':False}
+            'markers': read_json(directory(identifier),'markers.json',[]),
+            'calibrations':read_json(directory(identifier),'floor_calibration.json',{}),
+            'calibrated':bool(read_json(directory(identifier),'floor_calibration.json',{}))}
 
 
 @app.put('/api/datasets/{identifier}/floorplan')
@@ -431,6 +435,52 @@ def floor_markers(identifier: str, markers: list[Marker]):
         raise HTTPException(422,'Укажите уникальные существующие камеры')
     save(directory(identifier)/'markers.json',[m.model_dump() for m in markers])
     return {'status':'ok'}
+
+
+class FloorPoint(BaseModel):
+    video: tuple[float,float]
+    plan: tuple[float,float]
+
+
+@app.put('/api/datasets/{identifier}/floorplan/calibration/{camera_id}')
+def floor_calibration(identifier: str, camera_id: int, points: list[FloorPoint]):
+    cameras={c['camera_id']:c for c in dataset(identifier)['cameras']}
+    if camera_id not in cameras or not cameras[camera_id].get('width'):
+        raise HTTPException(422,'Для привязки подключите видео камеры')
+    if not (directory(identifier)/'floorplan.png').is_file():
+        raise HTTPException(422,'Сначала загрузите план')
+    calibration=fit_floor([p.model_dump() for p in points])
+    saved=read_json(directory(identifier),'floor_calibration.json',{})
+    saved[str(camera_id)]=calibration
+    save(directory(identifier)/'floor_calibration.json',saved)
+    return calibration
+
+
+@app.get('/api/datasets/{identifier}/frame/{camera_id}')
+def camera_frame(identifier: str,camera_id: int,time: float=Query(0,ge=0,allow_inf_nan=False)):
+    camera=next((c for c in dataset(identifier)['cameras'] if c['camera_id']==camera_id),None)
+    if not camera or not camera.get('path'): raise HTTPException(404,'Видео не подключено')
+    cap=cv2.VideoCapture(camera['path'])
+    try:
+        cap.set(cv2.CAP_PROP_POS_MSEC,time*1000);ok,frame=cap.read()
+        if not ok: raise HTTPException(422,'Кадр за пределами видео или не декодируется')
+        return Response(cv2.imencode('.jpg',frame)[1].tobytes(),media_type='image/jpeg')
+    finally: cap.release()
+
+
+@app.get('/api/datasets/{identifier}/floorplan/trajectories')
+def floor_trajectories(identifier: str,start: float=Query(0,allow_inf_nan=False),
+                       end: float=Query(30,allow_inf_nan=False),global_id: int|None=None):
+    if end<start or end-start>120: raise HTTPException(422,'Выберите интервал не больше 120 секунд')
+    d=dataset(identifier);cal=read_json(directory(identifier),'floor_calibration.json',{})
+    cameras={c['camera_id']:c for c in d['cameras']}
+    clauses='timestamp>=? AND timestamp<=?';args=[start,end]
+    if global_id is not None: clauses+=' AND global_id=?';args.append(global_id)
+    data=rows(directory(identifier)/'index.sqlite',f'SELECT * FROM observations WHERE {clauses} ORDER BY timestamp,camera_id,local_id LIMIT 10001',args)
+    result=project_floor(data[:10000],cameras,cal)
+    return {'points':result,'truncated':len(data)>10000,'calibrated_cameras':[int(k) for k in cal],
+            'coordinate_system':'normalized_plan_pixels','kind':'manual_estimate',
+            'warning':'Приблизительная проекция нижней середины bbox на пол; не измеренные координаты. Межкамерные пробелы не соединяются.'}
 
 
 @app.get('/{path:path}', include_in_schema=False)
