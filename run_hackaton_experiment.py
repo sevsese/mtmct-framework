@@ -49,7 +49,7 @@ FLOOR_CALIBRATION = ROOT / "configs" / "hackaton_office_map_approx.json"
 GALLERY_WEIGHT = 0.65      # best quality view + whole-track mean
 PART_WEIGHT = 0.30         # view-tolerant upper/lower clothing evidence
 MIN_OBSERVATIONS = 5       # reject 1-4 frame ByteTrack noise
-ZOOM_ROIS = {4:(.36,0,.64,.34)}  # camera 5, normalized xyxy
+ZOOM_ROIS = {}  # Full-frame detection only; crop pass produced head/torso duplicates.
 MIN_PERSON_SIZES = {2: (.016, .065), 4: (.012, .045)}  # camera 3: ~42x127 px; camera 5: ~31x87 px
 EXCLUDE_ROIS = {
     2: [
