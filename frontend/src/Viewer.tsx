@@ -4,9 +4,9 @@ import { Maximize2,Pause,Play,Video } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api,Camera,Observation,Track,cameraTime,color,observationsAtFrame,shouldSeekVideo,time,useApi,videoPlaybackRate } from './api';
 
-function CameraPanel({camera,dataset,clock,playing,boxes,globalId,onError}:{camera:Camera;dataset:string;clock:number;playing:boolean;boxes:boolean;globalId:number|null;onError:(message:string)=>void}){
+function CameraPanel({camera,dataset,clock,playing,master,boxes,globalId,onMasterFrame,onError}:{camera:Camera;dataset:string;clock:number;playing:boolean;master:boolean;boxes:boolean;globalId:number|null;onMasterFrame:()=>void;onError:(message:string)=>void}){
   const video=useRef<HTMLVideoElement>(null),canvas=useRef<HTMLCanvasElement>(null),container=useRef<HTMLDivElement>(null);
-  const samples=useRef<Observation[]>([]),selection=useRef({boxes,globalId});selection.current={boxes,globalId};
+  const samples=useRef<Observation[]>([]),selection=useRef({boxes,globalId}),masterClock=useRef({master,onMasterFrame});selection.current={boxes,globalId};masterClock.current={master,onMasterFrame};
   const [error,setError]=useState(''),[sampleVersion,setSampleVersion]=useState(0);const bucket=Math.floor(clock/2);
   useEffect(()=>{const controller=new AbortController();
     async function load(){let collected:Observation[]=[];let offset=0;while(true){const result=await api<{items:Observation[];total:number}>(`/api/datasets/${dataset}/observations?camera_id=${camera.camera_id}&start=${Math.max(0,bucket*2-.2)}&end=${bucket*2+2.3}&offset=${offset}&limit=10000`,{signal:controller.signal});collected.push(...result.items);offset+=result.items.length;if(offset>=result.total||!result.items.length)break;}samples.current=collected;setSampleVersion(v=>v+1);setError('');}
@@ -43,8 +43,8 @@ function CameraPanel({camera,dataset,clock,playing,boxes,globalId,onError}:{came
           }
       }
     };
-    const redraw=()=>draw(),next:VideoFrameRequestCallback=(_,metadata)=>{draw(metadata.mediaTime);frame=v.requestVideoFrameCallback(next)};
-    draw();
+    const redraw=()=>draw(),next:VideoFrameRequestCallback=(_,metadata)=>{draw(metadata.mediaTime);if(masterClock.current.master)masterClock.current.onMasterFrame();frame=v.requestVideoFrameCallback(next)};
+    if(!playing)draw();
     if(playing&&'requestVideoFrameCallback' in v)frame=v.requestVideoFrameCallback(next);else v.addEventListener('timeupdate',redraw);
     window.addEventListener('resize',redraw);
     return()=>{if(frame)v.cancelVideoFrameCallback(frame);v.removeEventListener('timeupdate',redraw);window.removeEventListener('resize',redraw)};
@@ -60,19 +60,21 @@ function CameraPanel({camera,dataset,clock,playing,boxes,globalId,onError}:{came
 export function Viewer({id}:{id:string}){
   const {data:cameras,error}=useApi<Camera[]>(`/api/datasets/${id}/cameras`);const [params]=useSearchParams();
   const {data:details}=useApi(`/api/datasets/${id}`);
-  const [clock,setClock]=useState(Number(params.get('time')||0)),[playing,setPlaying]=useState(false),[boxes,setBoxes]=useState(true),[selected,setSelected]=useState<string[]>([]),[columns,setColumns]=useState('3'),[failure,setFailure]=useState('');
+  const [clock,setClock]=useState(Number(params.get('time')||0)),[playing,setPlaying]=useState(false),[masterStarted,setMasterStarted]=useState(false),[boxes,setBoxes]=useState(true),[selected,setSelected]=useState<string[]>([]),[columns,setColumns]=useState('3'),[failure,setFailure]=useState('');
   const [gid,setGid]=useState<number|string>(params.get('global')??'');const clockRef=useRef(clock);clockRef.current=clock;
   const max=Math.max(1,...(cameras||[]).map(c=>(c.duration??0)+(c.offset??0))),min=Math.min(0,...(cameras||[]).map(c=>c.offset??0));
-  useEffect(()=>{if(!playing)return;let raf=0;let last=performance.now(),lastUpdate=last;const tick=(now:number)=>{clockRef.current+=Math.min((now-last)/1000,.25);last=now;if(clockRef.current>=max){clockRef.current=max;setPlaying(false);}if(now-lastUpdate>=100){setClock(clockRef.current);lastUpdate=now;}raf=requestAnimationFrame(tick)};raf=requestAnimationFrame(tick);return()=>cancelAnimationFrame(raf)},[playing,max]);
-  useEffect(()=>{const next=Number(params.get('time')||0);setPlaying(false);setGid(params.get('global')??'');clockRef.current=next;setClock(next);},[id,params]);
-  async function chooseGlobal(value:number|string){setGid(value);if(value==='')return;try{const track=await api<Track>(`/api/datasets/${id}/tracks/${Number(value)}`);if(track.start_time!==null){setPlaying(false);clockRef.current=track.start_time;setClock(track.start_time)}}catch(e){setFailure((e as Error).message)}}
+  useEffect(()=>{if(!playing||!masterStarted)return;const timer=setInterval(()=>{clockRef.current=Math.min(clockRef.current+.1,max);setClock(clockRef.current);if(clockRef.current>=max)setPlaying(false)},100);return()=>clearInterval(timer)},[playing,masterStarted,max]);
+  useEffect(()=>{const next=Number(params.get('time')||0);setPlaying(false);setMasterStarted(false);setGid(params.get('global')??'');clockRef.current=next;setClock(next);},[id,params]);
+  async function chooseGlobal(value:number|string){setGid(value);if(value==='')return;try{const track=await api<Track>(`/api/datasets/${id}/tracks/${Number(value)}`);if(track.start_time!==null){setPlaying(false);setMasterStarted(false);clockRef.current=track.start_time;setClock(track.start_time)}}catch(e){setFailure((e as Error).message)}}
   const shown=(cameras||[]).filter(c=>!selected.length||selected.includes(String(c.camera_id)));
+  const master=shown.find(c=>c.video_url&&cameraTime(clock,c).active)?.camera_id;
+  function startFromMaster(){if(!masterStarted)setMasterStarted(true)}
   return <><div className="page-title"><div className="eyebrow">СИНХРОННОЕ НАБЛЮДЕНИЕ</div><h1>Камеры</h1><p>Единое время и идентификаторы из результатов алгоритма</p></div>
     {(error||failure)&&<Alert color="red" mb="md">{error||failure}</Alert>}
     <Group className="toolbar" justify="space-between"><Group><MultiSelect aria-label="Фильтр камер" placeholder="Все камеры" data={(cameras||[]).map(c=>({value:String(c.camera_id),label:c.name}))} value={selected} onChange={setSelected}/><NumberInput aria-label="Выбрать Global ID" placeholder="Все Global ID" min={0} value={gid} onChange={chooseGlobal} w={160}/><Checkbox label="Bounding boxes" checked={boxes} onChange={e=>setBoxes(e.currentTarget.checked)}/>{gid!==''&&<Text size="sm" c="blue">Выбран Global {gid} · видео с начала трека</Text>}</Group><Select aria-label="Сетка камер" w={130} value={columns} onChange={v=>setColumns(v||'2')} data={[{value:'2',label:'2 колонки'},{value:'3',label:'3 колонки'}]}/></Group>
     <Text size="xs" c="dimmed" mb="sm">Наблюдения в результате: {time(details?.summary.result_start)} — {time(details?.summary.result_end)}. Полная длительность видео может быть больше.</Text>
-    <div className="camera-grid" style={{gridTemplateColumns:`repeat(${columns},minmax(0,1fr))`}}>{shown.map(c=><CameraPanel key={c.camera_id} camera={c} dataset={id} clock={clock} playing={playing} boxes={boxes} globalId={gid===''?null:Number(gid)} onError={message=>{setPlaying(false);setFailure(message)}}/>)}</div>
+    <div className="camera-grid" style={{gridTemplateColumns:`repeat(${columns},minmax(0,1fr))`}}>{shown.map(c=><CameraPanel key={c.camera_id} camera={c} dataset={id} clock={clock} playing={playing&&(c.camera_id===master||masterStarted)} master={c.camera_id===master} boxes={boxes} globalId={gid===''?null:Number(gid)} onMasterFrame={startFromMaster} onError={message=>{setPlaying(false);setFailure(message)}}/>)}</div>
     {!cameras?.length&&<div className="empty">Подключите видео или загрузите результаты с Camera ID</div>}
-    <div className="transport"><Button onClick={()=>setPlaying(p=>!p)} disabled={!shown.some(c=>c.video_url)} leftSection={playing?<Pause size={16}/>:<Play size={16}/>}>{playing?'Пауза':'Воспроизвести'}</Button><Text ff="monospace">{time(clock)}</Text><Slider aria-label="Общий таймлайн" min={min} max={max} step={.0333333} value={clock} onChange={v=>{setPlaying(false);setClock(v)}} label={time} style={{flex:1}}/><Text c="dimmed" ff="monospace">{time(max)}</Text></div>
+    <div className="transport"><Button onClick={()=>{if(playing)setPlaying(false);else{setMasterStarted(false);setPlaying(true)}}} disabled={master===undefined} leftSection={playing?<Pause size={16}/>:<Play size={16}/>}>{playing?'Пауза':'Воспроизвести'}</Button><Text ff="monospace">{time(clock)}</Text><Slider aria-label="Общий таймлайн" min={min} max={max} step={.0333333} value={clock} onChange={v=>{setPlaying(false);setMasterStarted(false);clockRef.current=v;setClock(v)}} label={time} style={{flex:1}}/><Text c="dimmed" ff="monospace">{time(max)}</Text></div>
   </>;
 }
