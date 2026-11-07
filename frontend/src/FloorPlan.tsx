@@ -17,7 +17,7 @@ export function FloorPlan({id}:{id:string}){
   const {data:cameras}=useApi<Camera[]>(`/api/datasets/${id}/cameras`);
   const {data:details}=useApi(`/api/datasets/${id}`);
   const end=Math.max(1,details?.summary?.result_end??Math.max(...(cameras||[]).map(c=>c.duration||0),1));
-  const {data:routes,error:routeError}=useApi<{points:Point[];truncated:boolean;warning:string}>(data?.calibrated&&!editing?`/api/datasets/${id}/floorplan/trajectories?start=${Math.max(0,clock-15)}&end=${clock}${gid===''?'':`&global_id=${gid}`}`:null,revision);
+  const {data:routes,error:routeError}=useApi<{points:Point[];truncated:boolean;warning:string}>(data?.calibrated&&!editing?`/api/datasets/${id}/floorplan/trajectories?start=${Math.max(0,clock-15)}&end=${clock}${gid===''?'':`&global_id=${gid}`}`:null,revision,true);
   useEffect(()=>{if(!playing)return;const timer=setInterval(()=>setClock(t=>{if(t+.2>=end){setPlaying(false);return end}return t+.2}),200);return()=>clearInterval(timer)},[playing,end]);
   useEffect(()=>{setPairs([]);setPending(null)},[camera]);
   async function upload(){if(!file)return;try{const body=new FormData();body.append('file',file);await api(`/api/datasets/${id}/floorplan`,{method:'POST',body});setRevision(r=>r+1);setError('')}catch(e){setError((e as Error).message)}}
@@ -28,7 +28,7 @@ export function FloorPlan({id}:{id:string}){
     try{await api(`/api/datasets/${id}/floorplan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify([...(data?.markers||[]).filter((m:any)=>m.camera_id!==Number(camera)),{camera_id:Number(camera),x,y}])});setRevision(r=>r+1)}catch(e){setError((e as Error).message)}
   }
   const groups=new Map<string,Point[]>();
-  for(const p of routes?.points||[]){const key=`${p.camera_id}:${p.local_id}:${p.global_id}`;if(!groups.has(key))groups.set(key,[]);groups.get(key)!.push(p)}
+  for(const p of routes?.points||[]){if(p.timestamp>clock||p.timestamp<clock-15||(gid!==''&&p.global_id!==Number(gid)))continue;const key=`${p.camera_id}:${p.local_id}:${p.global_id}`;if(!groups.has(key))groups.set(key,[]);groups.get(key)!.push(p)}
   const segments:Point[][]=[];const heads:Point[]=[];
   for(const points of groups.values()){
     let segment:Point[]=[];

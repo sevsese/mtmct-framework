@@ -10,9 +10,9 @@ export async function api<T=any>(path:string,init?:RequestInit):Promise<T>{
   return response.json();
 }
 export const post=(path:string,body:unknown)=>api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-export function useApi<T=any>(url:string|null,revision=0){
+export function useApi<T=any>(url:string|null,revision=0,keepPrevious=false){
   const [data,setData]=useState<T|null>(null),[error,setError]=useState('');
-  useEffect(()=>{setData(null);setError('');if(!url)return;const abort=new AbortController();api<T>(url,{signal:abort.signal}).then(setData).catch(e=>{if(e.name!=='AbortError')setError(e.message)});return()=>abort.abort()},[url,revision]);
+  useEffect(()=>{if(!keepPrevious||!url)setData(null);setError('');if(!url)return;const abort=new AbortController();api<T>(url,{signal:abort.signal}).then(setData).catch(e=>{if(e.name!=='AbortError')setError(e.message)});return()=>abort.abort()},[url,revision,keepPrevious]);
   return {data,error};
 }
 export const color=(id:number|null)=>id===null?'#aab4c5':`hsl(${((id*137.508)%360+360)%360} 78% 67%)`;
