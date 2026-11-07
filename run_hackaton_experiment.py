@@ -62,7 +62,7 @@ REVIEW_REFERENCE = ROOT / "runs" / "hackaton_5cam_60s_v10"
 # ============================================================================
 
 
-def main(duration_seconds=DURATION_SECONDS):
+def main(duration_seconds=DURATION_SECONDS, matcher="v2"):
     sources = {camera: VIDEO_DIR / name for camera, name in CAMERAS.items()}
     missing = [str(path) for path in sources.values() if not path.is_file()]
     if missing:
@@ -82,7 +82,7 @@ def main(duration_seconds=DURATION_SECONDS):
                            "duration_seconds": duration_seconds, "frame_stride": FRAME_STRIDE,
                            "tracker": str(TRACKER), "conf": CONF,
                            "camera_offset": [f"{camera}={seconds}" for camera, seconds in CAMERA_OFFSETS_SECONDS.items()],
-                           "geometry": False, "metrics": False})
+                           "geometry": False, "metrics": False, "matcher": matcher})
         track(VIDEO_DIR, out, MODEL, "osnet", None, DEVICE, 0, FRAME_STRIDE, 5,
               IMGSZ, CONF, reid_model=REID_MODEL, cameras=list(sources),
               tracker=TRACKER, camera_sources=sources, max_seconds=duration_seconds,
@@ -97,18 +97,19 @@ def main(duration_seconds=DURATION_SECONDS):
                  max_interior_gap_seconds=GLOBAL_MAX_GAP_SECONDS,
                  camera_fps=CAMERA_FPS, camera_offsets_s=CAMERA_OFFSETS_SECONDS,
                  transition_model=CameraTransitionModel.from_json(TOPOLOGY),
-                 gallery_weight=GALLERY_WEIGHT, part_weight=PART_WEIGHT,
+                 gallery_weight=.25 if matcher == "v2" else GALLERY_WEIGHT, part_weight=PART_WEIGHT,
                  use_geometry=False, use_time=True)
     tracklets, mapping, _, predictions, _ = link(
-        out, cfg, matcher="graph", allow_same_camera_fragments=True, memory=False,
+        out, cfg, matcher=matcher, allow_same_camera_fragments=True, memory=False,
+        repair_occlusions=matcher == "v2",
         min_observations=MIN_OBSERVATIONS)
-    finish(out,sources,tracklets,mapping,predictions,duration_seconds)
+    finish(out,sources,tracklets,mapping,predictions,duration_seconds, matcher == "graph")
 
 
-def finish(out,sources,tracklets,mapping,predictions,duration_seconds=DURATION_SECONDS):
+def finish(out,sources,tracklets,mapping,predictions,duration_seconds=DURATION_SECONDS, review=False):
     base=REVIEW_REFERENCE/"wall_map_points"/"wall_anchors.json"
     reviewed_map=None
-    if duration_seconds == DURATION_SECONDS and base.is_file() and (REVIEW_REFERENCE/"global_tracks_2d.csv").is_file():
+    if review and duration_seconds == DURATION_SECONDS and base.is_file() and (REVIEW_REFERENCE/"global_tracks_2d.csv").is_file():
         reference=tracks(REVIEW_REFERENCE/"global_tracks_2d.csv")
         reviewed_map,projection=fit_projection(reference,json.loads(base.read_text()),
                                                CAMERA_FPS,CAMERA_OFFSETS_SECONDS)
@@ -163,7 +164,8 @@ def finish(out,sources,tracklets,mapping,predictions,duration_seconds=DURATION_S
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--full", action="store_true", help="Process every frame interval to the end of each video")
+    parser.add_argument("--matcher", choices=["v2", "graph"], default="v2")
     args = parser.parse_args()
     if args.full and LINK_ONLY:
         parser.error("--full requires LINK_ONLY=False")
-    main(None if args.full else DURATION_SECONDS)
+    main(None if args.full else DURATION_SECONDS, args.matcher)

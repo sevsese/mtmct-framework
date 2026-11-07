@@ -16,7 +16,7 @@ from .geometry import calibration_maps, camera_number, project_pixel
 from .reid import ReID, normalized
 from .export import FIELDS
 from .cache import write_manifest
-from .features import MAX_SAMPLES, crop_quality
+from .features import MAX_SAMPLES, crop_quality_details
 from .frame_sources import FrameSource
 
 
@@ -80,7 +80,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
             # id -> data. Only a sum and count for embeddings, not every crop.
             by_id=defaultdict(lambda: {"start_frame":10**12,"end_frame":-1,
                                        "positions":[],"embedding_sum":None,"samples":0,
-                                       "feature_samples":[]})
+                                       "feature_samples":[], "temporal_samples":[], "temporal_step":1})
             fid=0
             processed=0
             if device.startswith("cuda"):
@@ -136,16 +136,28 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                 if crop.size:
                                     crops.append(cv2.cvtColor(crop,cv2.COLOR_BGR2RGB))
                                     clipped = x1 <= 0 or y1 <= 0 or x2 >= w or y2 >= h
-                                    sampled_keys.append((local_id, crop_quality(crops[-1], float(score), clipped)))
+                                    details = crop_quality_details(crops[-1], float(score), clipped)
+                                    other = rects[ids != local_id]
+                                    covered = np.maximum(0, np.minimum(other[:, 2:], [x2,y2])
+                                                         - np.maximum(other[:, :2], [x1,y1])).prod(axis=1)
+                                    details["occlusion_proxy"] = min(1., float(covered.max(initial=0)) / ((x2-x1)*(y2-y1)))
+                                    quality = details["det"] * details["border"] * (.5*details["size"] + .5*details["sharpness"])
+                                    sampled_keys.append((local_id, quality, details))
                     embeddings=reid.encode(crops)
                     processed += 1
-                    for (lid,quality),e in zip(sampled_keys,embeddings):
+                    for (lid,quality,details),e in zip(sampled_keys,embeddings):
                         row=by_id[lid]
                         if row["embedding_sum"] is None:
                             row["embedding_sum"]=np.zeros_like(e,dtype=np.float64)
                         row["embedding_sum"]+=e
+                        vector = e.tolist()
+                        if row["samples"] % row["temporal_step"] == 0:
+                            row["temporal_samples"].append((fid,vector,quality))
+                            if len(row["temporal_samples"]) > 256:
+                                row["temporal_samples"] = row["temporal_samples"][::2]
+                                row["temporal_step"] *= 2
                         row["samples"]+=1
-                        row["feature_samples"].append((quality,fid,e.tolist()))
+                        row["feature_samples"].append((quality,fid,vector,details))
                         row["feature_samples"] = sorted(
                             row["feature_samples"], key=lambda sample: -sample[0])[:MAX_SAMPLES]
                     if fid%100==0:
@@ -189,6 +201,10 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                   "feature_quality":[sample[0] for sample in track["feature_samples"]],
                                   "feature_frames":[sample[1] for sample in track["feature_samples"]],
                                   "feature_vectors":[sample[2] for sample in track["feature_samples"]],
+                                  "feature_quality_details":[sample[3] for sample in track["feature_samples"]],
+                                  "temporal_frames":[sample[0] for sample in track["temporal_samples"]],
+                                  "temporal_vectors":[sample[1] for sample in track["temporal_samples"]],
+                                  "temporal_quality":[sample[2] for sample in track["temporal_samples"]],
                                   "samples":track["samples"]})
             del model
             if device.startswith("cuda"):

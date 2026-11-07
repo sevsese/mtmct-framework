@@ -101,13 +101,13 @@ def _pairwise_metrics(matched_by_camera: dict[int, Counter]):
 
 
 def eval_2d(pred_path: Path, gt_path: Path, cameras: list[int],
-            max_frames: int, stride: int = 1, threshold: float = 0.5):
-    if max_frames <= 0 or stride <= 0:
+            max_frames: int, stride: int = 1, threshold: float = 0.5, *, start_frame: int = 0):
+    if not 0 <= start_frame < max_frames or stride <= 0:
         raise ValueError("Use finite positive --max-frames and --stride")
     if not 0 <= threshold <= 1:
         raise ValueError("IoU threshold must be between 0 and 1")
     cameras = sorted(set(cameras))
-    selected_frames = set(range(0, max_frames, stride))
+    selected_frames = set(range(start_frame, max_frames, stride))
     selected_keys = {(frame, camera) for frame in selected_frames for camera in cameras}
 
     predictions = defaultdict(list)
@@ -133,13 +133,22 @@ def eval_2d(pred_path: Path, gt_path: Path, cameras: list[int],
 
     matches = Counter()
     matches_by_camera: dict[int, Counter] = {camera: Counter() for camera in cameras}
-    for key in selected_keys:
+    previous = {}
+    switches = 0
+    for key in sorted(selected_keys):
         for gt_id, pred_id in _match_boxes(ground_truth[key], predictions[key], threshold):
             matches[(gt_id, pred_id)] += 1
             matches_by_camera[key[1]][(gt_id, pred_id)] += 1
+            track = key[1], gt_id
+            switches += int(track in previous and previous[track] != pred_id)
+            previous[track] = pred_id
 
     gt_total, pred_total = sum(gt_by_camera.values()), sum(pred_by_camera.values())
     global_metrics = _identity_metrics(matches, gt_total, pred_total)
+    by_prediction, by_truth = defaultdict(set), defaultdict(set)
+    for gt_id, pred_id in matches:
+        by_prediction[pred_id].add(gt_id)
+        by_truth[gt_id].add(pred_id)
     detection_tp = sum(matches.values())
     detection = {
         "TP": detection_tp,
@@ -163,12 +172,20 @@ def eval_2d(pred_path: Path, gt_path: Path, cameras: list[int],
         "official_nvidia_3d_hota": False,
         "iou_threshold": threshold,
         "max_frames": max_frames,
+        "start_frame": start_frame,
         "stride": stride,
         "cameras": cameras,
         "global": global_metrics,
         "detection": detection,
         "per_camera": per_camera,
         "pairwise_association": _pairwise_metrics(matches_by_camera),
+        "identity_diagnostics": {
+            "IDSW": switches,
+            "N_global": len({gid for frame in predictions.values() for gid, _ in frame}),
+            "N_false_merge": sum(len(ids) > 1 for ids in by_prediction.values()),
+            "N_fragment": sum(len(ids) > 1 for ids in by_truth.values()),
+            "protocol": "At least one IoU match per identity pair; IDSW on consecutive matched observations per camera and GT ID.",
+        },
         # Compatibility with the previous CLI/report consumers.
         "diagnostic_IDF1": round(global_metrics["IDF1"], 4),
         "IDTP": global_metrics["IDTP"],

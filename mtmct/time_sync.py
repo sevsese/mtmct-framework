@@ -15,9 +15,11 @@ class TransitionResult:
 
 class CameraTransitionModel:
     def __init__(self, routes: dict[tuple[int, int], dict] | None = None,
-                 overlap_pairs: set[frozenset[int]] | None = None):
+                 overlap_pairs: set[frozenset[int]] | None = None,
+                 disjoint_pairs: set[frozenset[int]] | None = None):
         self.routes = routes or {}
         self.overlap_pairs = overlap_pairs or set()
+        self.disjoint_pairs = disjoint_pairs or set()
 
     @classmethod
     def from_json(cls, path: str | Path):
@@ -29,7 +31,10 @@ class CameraTransitionModel:
             frozenset((int(pair[0]), int(pair[1])))
             for pair in data.get("overlap_pairs", [])
         }
-        return cls(routes, overlap_pairs)
+        disjoint = {frozenset(map(int, pair)) for pair in data.get("disjoint_pairs", [])}
+        if disjoint & overlap_pairs:
+            raise ValueError("Camera pairs cannot be both overlapping and disjoint")
+        return cls(routes, overlap_pairs, disjoint)
 
     def allows_overlap(self, camera_a: int, camera_b: int) -> bool:
         return frozenset((int(camera_a), int(camera_b))) in self.overlap_pairs
@@ -70,3 +75,16 @@ def track_times(tracklet: dict, fps: float | dict[int, float],
         raise ValueError(f"fps must be positive for camera {camera}")
     return (float(tracklet["start_frame"]) / camera_fps + offset,
             float(tracklet["end_frame"]) / camera_fps + offset)
+
+
+def observation_time(tracklet, frame, fps, offsets=None, starts=None):
+    """Local PTS takes precedence over frame/FPS. Offsets are applied once."""
+    camera = int(tracklet["camera_id"])
+    timestamp = (tracklet.get("frame_timestamps") or {}).get(str(frame))
+    if timestamp is None and frame == int(tracklet["end_frame"]):
+        timestamp = tracklet.get("end_s")
+    if timestamp is None and tracklet.get("start_s") is not None:
+        timestamp = float(tracklet["start_s"]) + (frame - int(tracklet["start_frame"])) / fps
+    if timestamp is None:
+        timestamp = frame / fps
+    return float(timestamp) + (starts or {}).get(camera, 0.) + (offsets or {}).get(camera, 0.)

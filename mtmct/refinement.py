@@ -111,6 +111,9 @@ def refine(tracklets: list[dict], *, auto_split: bool = False, auto_merge: bool 
 
 
 def rewrite_observations(source: Path, destination: Path, remap: list[dict]):
+    lookup = {}
+    for item in remap:
+        lookup.setdefault((item["camera_id"], item["local_id"]), []).append(item)
     with source.open(newline="", encoding="utf-8") as input_stream, \
          destination.open("w", newline="", encoding="utf-8") as output_stream:
         reader = csv.DictReader(input_stream)
@@ -118,12 +121,92 @@ def rewrite_observations(source: Path, destination: Path, remap: list[dict]):
         writer.writeheader()
         for row in reader:
             camera, local_id, frame = int(row["camera_id"]), int(row["local_id"]), int(row["frame_id"])
-            match = next((item for item in remap if item["camera_id"] == camera
-                          and item["local_id"] == local_id
-                          and item["start_frame"] <= frame <= item["end_frame"]), None)
+            match = next((item for item in lookup.get((camera, local_id), ())
+                          if item["start_frame"] <= frame <= item["end_frame"]), None)
             if match:
                 row["local_id"] = match["new_local_id"]
             writer.writerow(row)
+
+
+def split_sustained(tracklets, cfg):
+    """Split only when sustained ReID change also has a same-view motion break."""
+    from .scoring import Evidence
+    from .time_sync import observation_time
+
+    next_id = {}
+    for row in tracklets:
+        c, lid = int(row["camera_id"]), int(row["local_id"])
+        next_id[c] = max(next_id.get(c, 0), lid + 1)
+    output, remap, diagnostics = [], [], []
+    for row in tracklets:
+        track = Evidence(row, cfg)
+        c, lid = track.key
+        frames = row.get("temporal_frames") or row.get("feature_frames", [])
+        vectors = row.get("temporal_vectors") or row.get("feature_vectors", [])
+        qualities = row.get("temporal_quality", []) if row.get("temporal_vectors") else row.get("feature_quality", [])
+        if len(qualities) != len(vectors):
+            qualities = [None] * len(vectors)
+        samples = sorted((int(f), i, normalize(v)) for i, (f, v) in enumerate(zip(frames, vectors))
+                         if len(v) and np.isfinite(v).all() and np.linalg.norm(v) > 1e-9
+                         and (qualities[i] is None or qualities[i] >= .20))
+        boundary = None
+        boxes = row.get("observation_boxes", {})
+        for index in range(3, len(samples) - 2):
+            before = np.asarray([v for _, _, v in samples[index-3:index]])
+            after = np.asarray([v for _, _, v in samples[index:index+3]])
+            a, b = normalize(before.mean(axis=0)), normalize(after.mean(axis=0))
+            similarity = float(a @ b)
+            if min(before @ a) < .8 or min(after @ b) < .8 or similarity >= .5:
+                continue
+            left, right = samples[index-1][0], samples[index][0]
+            box_a, box_b = boxes.get(str(left)), boxes.get(str(right))
+            if not box_a or not box_b:
+                continue
+            x1, y1, x2, y2 = box_a
+            u1, v1, u2, v2 = box_b
+            jump = np.hypot((x1+x2-u1-u2)/2, y2-v2) / max(y2-y1, v2-v1, 1.)
+            dt = track.time(right) - track.time(left)
+            confirmed = 0 < dt <= 1.0 and jump > .9 + 2 * dt
+            diagnostics.append({"camera_id": c, "local_id": lid, "frame": right,
+                                "cosine": similarity, "box_jump_heights": float(jump), "split": confirmed})
+            if confirmed:
+                boundary = right
+                break
+        if boundary is None:
+            output.append(dict(row, suspect_switch=True) if diagnostics and
+                          diagnostics[-1]["camera_id"] == c and diagnostics[-1]["local_id"] == lid else row)
+            continue
+        provenance = {"camera_id": c, "local_id": lid,
+                      "start_frame": int(row["start_frame"]), "end_frame": int(row["end_frame"]),
+                      "source_uid": track.uid}
+        for start, end, new_id in ((provenance["start_frame"], boundary-1, lid),
+                                   (boundary, provenance["end_frame"], next_id[c])):
+            observed = sorted(f for f in track.frames if start <= f <= end)
+            if observed:
+                start, end = observed[0], observed[-1]
+            part = dict(row, local_id=new_id, start_frame=start, end_frame=end,
+                        start_s=observation_time(row, start, track.fps),
+                        end_s=observation_time(row, end, track.fps), observation_frames=observed,
+                        tracklet_uid=track.uid if new_id == lid else f"{track.uid}:from:{boundary}",
+                        provenance=[provenance], body_parts=[])
+            part["positions"] = [p for p in row.get("positions", []) if start <= int(p[0]) <= end]
+            for key in ("observation_boxes", "frame_timestamps", "position_covariances"):
+                part[key] = {k: v for k, v in row.get(key, {}).items() if start <= int(k) <= end}
+            for prefix in ("feature", "temporal"):
+                indexes = [i for i, f in enumerate(row.get(prefix+"_frames", [])) if start <= int(f) <= end]
+                suffixes = ("frames", "vectors", "quality", "quality_details") if prefix == "feature" else ("frames", "vectors", "quality")
+                for suffix in suffixes:
+                    values = row.get(prefix+"_"+suffix, [])
+                    part[prefix+"_"+suffix] = [values[i] for i in indexes if i < len(values)]
+                if prefix == "feature" and "foreground_ratio" in row:
+                    part["foreground_ratio"] = [row["foreground_ratio"][i] for i in indexes]
+            values = part["temporal_vectors"] or part["feature_vectors"]
+            part["embedding"] = normalize(np.mean([normalize(v) for v in values], axis=0)).tolist() if values else []
+            part["samples"] = len(values)
+            output.append(part)
+            remap.append({**provenance, "start_frame": start, "end_frame": end, "new_local_id": new_id})
+        next_id[c] += 1
+    return output, remap, diagnostics
 
 
 def main():

@@ -32,7 +32,8 @@ def export_predictions(observations_path: str | Path,
     with open(observations_path, newline="", encoding="utf-8") as fi, \
          open(out_csv, "w", newline="",encoding="utf-8") as fo:
         reader = csv.DictReader(fi)
-        writer = csv.DictWriter(fo, fieldnames=FIELDS+["global_id"])
+        optional = ["timestamp_s"] if "timestamp_s" in (reader.fieldnames or ()) else []
+        writer = csv.DictWriter(fo, fieldnames=FIELDS+optional+["global_id"])
         writer.writeheader()
         for r in reader:
             key=(int(r["camera_id"]),int(r["local_id"]))

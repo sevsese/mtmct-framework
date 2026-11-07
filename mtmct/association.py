@@ -37,6 +37,9 @@ class Config:
     max_interior_gap_seconds: float = 30.0
     max_interior_motion_heights: float = 4.0
     duplicate_overlap_iou: float = 0.5
+    camera_start_s: dict[int, float] | None = None
+    sync_tolerance_s: float = 0.06
+    geometry_sigma_m: float = 1.0
 
 
 def unit(v: list[float] | np.ndarray) -> np.ndarray:

@@ -95,10 +95,11 @@ def main():
     cameras = spec["cameras"]
     office_ids = office_camera_ids(cameras)
     options = spec["options"]
+    matcher = options.get("matcher", "v2")
     if not (ROOT / MODEL).is_file():
         raise FileNotFoundError(f"Модель отсутствует: {ROOT / MODEL}")
     write_config(output, options | {
-        "model": MODEL, "reid_model": REID_MODEL, "matcher": "graph",
+        "model": MODEL, "reid_model": REID_MODEL, "matcher": matcher,
         "memory": False, "geometry": False, "frame_stride": FRAME_STRIDE,
         "imgsz": IMGSZ, "conf": CONF,
         "camera_offset": [f"{c['camera_id']}={c.get('offset', 0)}" for c in cameras],
@@ -164,6 +165,7 @@ def main():
         topology = CameraTransitionModel(
             {(actual[a], actual[b]): route for (a, b), route in preset.routes.items()},
             {frozenset(actual[c] for c in pair) for pair in preset.overlap_pairs},
+            {frozenset(actual[c] for c in pair) for pair in preset.disjoint_pairs},
         )
     link(
         output,
@@ -173,10 +175,11 @@ def main():
             max_gap_seconds=GLOBAL_MAX_GAP_SECONDS, camera_fps=fps,
             max_interior_gap_seconds=GLOBAL_MAX_GAP_SECONDS,
             camera_offsets_s=offsets, transition_model=topology,
-            gallery_weight=GALLERY_WEIGHT, part_weight=PART_WEIGHT,
+            gallery_weight=.25 if matcher == "v2" else GALLERY_WEIGHT, part_weight=PART_WEIGHT,
             use_geometry=False, use_time=True,
         ),
-        matcher="graph", allow_same_camera_fragments=True, memory=False,
+        matcher=matcher, allow_same_camera_fragments=True, memory=False,
+        repair_occlusions=matcher == "v2",
         min_observations=MIN_OBSERVATIONS,
     )
     print("STAGE completed", flush=True)

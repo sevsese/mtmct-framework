@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from typing import Literal
 
 import cv2
 import numpy as np
@@ -372,7 +373,14 @@ def track_detail(identifier: str, global_id: int):
                              'start_time': t, 'end_time': t})
         else:
             episodes[-1]['end_time'] = t
+    identity = read_json(folder, 'identity_state.json', {})
+    identity_state = identity.get('states', {}).get(str(global_id))
+    identity_events = [e for e in identity.get('events', [])
+                       if global_id in [e.get('global_id'), e.get('from'), e.get('to')]
+                       or global_id in (e['from'] if isinstance(e.get('from'), list) else [])
+                       or global_id in (e['to'] if isinstance(e.get('to'), list) else [])]
     return result | {'episodes': episodes, 'association_edges': edges[:200],
+                     'identity_state': identity_state, 'identity_events': identity_events,
                      'association_edges_total': len(edges)}
 
 
@@ -432,6 +440,7 @@ class ProcessOptions(BaseModel):
     max_frames: int = Field(default=0, ge=0, le=1000000)
     max_seconds: float | None = Field(default=None,gt=0,le=86400,allow_inf_nan=False)
     device: str = Field(default='cuda:0', pattern=r'^(cpu|cuda:[0-9]+)$')
+    matcher: Literal['v2','graph'] = 'v2'
 
 
 def run_job(identifier, options):
