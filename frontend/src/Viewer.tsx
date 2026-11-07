@@ -2,7 +2,7 @@ import { useEffect,useRef,useState } from 'react';
 import { Alert,Button,Checkbox,Group,MultiSelect,NumberInput,Select,Slider,Text } from '@mantine/core';
 import { Maximize2,Pause,Play,Video } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
-import { api,Camera,Observation,cameraTime,color,observationsAtFrame,shouldSeekVideo,time,useApi } from './api';
+import { api,Camera,Observation,Track,cameraTime,color,observationsAtFrame,shouldSeekVideo,time,useApi,videoPlaybackRate } from './api';
 
 function CameraPanel({camera,dataset,clock,playing,boxes,globalId,onError}:{camera:Camera;dataset:string;clock:number;playing:boolean;boxes:boolean;globalId:number|null;onError:(message:string)=>void}){
   const video=useRef<HTMLVideoElement>(null),canvas=useRef<HTMLCanvasElement>(null),container=useRef<HTMLDivElement>(null);
@@ -13,7 +13,8 @@ function CameraPanel({camera,dataset,clock,playing,boxes,globalId,onError}:{came
     if(camera.fps)load().catch(e=>{if(e.name!=='AbortError')setError(e.message)});return()=>controller.abort();
   },[dataset,camera.camera_id,camera.fps,bucket]);
   useEffect(()=>{const v=video.current;if(!v)return;const target=cameraTime(clock,camera);
-    if(Number.isFinite(v.duration)&&shouldSeekVideo(v.currentTime,target.local,playing))v.currentTime=target.local;
+    const seek=Number.isFinite(v.duration)&&shouldSeekVideo(v.currentTime,target.local,playing);if(seek)v.currentTime=target.local;
+    v.playbackRate=playing&&target.active&&!seek?videoPlaybackRate(v.currentTime,target.local):1;
     if(playing&&target.active){if(v.paused)v.play().catch(e=>onError(`Camera ${camera.camera_id}: ${e.message}`));}else v.pause();
   },[clock,playing,camera]);
   useEffect(()=>{
@@ -31,8 +32,10 @@ function CameraPanel({camera,dataset,clock,playing,boxes,globalId,onError}:{came
             for(const o of observationsAtFrame(samples.current,fid,camera.fps)){
               if(selection.current.globalId!==null&&o.global_id!==selection.current.globalId)continue;
               const [x1,y1,x2,y2]=o.bbox;
-              ctx.strokeStyle=color(o.global_id);ctx.strokeRect(x1,y1,x2-x1,y2-y1);
-              const label=o.global_id===null?`Local ${o.local_id} · ID не назначен`:`G${o.global_id} · L${o.local_id}`;
+              const chosen=selection.current.globalId!==null;
+              if(chosen){ctx.lineWidth=sourceWidth/220;ctx.strokeStyle='#fff';ctx.strokeRect(x1,y1,x2-x1,y2-y1)}
+              ctx.lineWidth=Math.max(2,sourceWidth/(chosen?400:700));ctx.strokeStyle=color(o.global_id);ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+              const label=o.global_id===null?`Local ${o.local_id} · ID не назначен`:`G${o.global_id} · L${o.local_id}${chosen?' · ВЫБРАН':''}`;
               const h=sourceWidth/70+10;ctx.fillStyle=color(o.global_id);
               ctx.fillRect(x1,Math.max(0,y1-h),ctx.measureText(label).width+12,h);
               ctx.fillStyle='#10151e';ctx.fillText(label,x1+6,Math.max(h,y1)-6);
@@ -61,11 +64,12 @@ export function Viewer({id}:{id:string}){
   const [gid,setGid]=useState<number|string>(params.get('global')??'');const clockRef=useRef(clock);clockRef.current=clock;
   const max=Math.max(1,...(cameras||[]).map(c=>(c.duration??0)+(c.offset??0))),min=Math.min(0,...(cameras||[]).map(c=>c.offset??0));
   useEffect(()=>{if(!playing)return;let raf=0;let last=performance.now(),lastUpdate=last;const tick=(now:number)=>{clockRef.current+=Math.min((now-last)/1000,.25);last=now;if(clockRef.current>=max){clockRef.current=max;setPlaying(false);}if(now-lastUpdate>=100){setClock(clockRef.current);lastUpdate=now;}raf=requestAnimationFrame(tick)};raf=requestAnimationFrame(tick);return()=>cancelAnimationFrame(raf)},[playing,max]);
-  useEffect(()=>{setPlaying(false);setClock(Number(params.get('time')||0));},[id,params]);
+  useEffect(()=>{const next=Number(params.get('time')||0);setPlaying(false);setGid(params.get('global')??'');clockRef.current=next;setClock(next);},[id,params]);
+  async function chooseGlobal(value:number|string){setGid(value);if(value==='')return;try{const track=await api<Track>(`/api/datasets/${id}/tracks/${Number(value)}`);if(track.start_time!==null){setPlaying(false);clockRef.current=track.start_time;setClock(track.start_time)}}catch(e){setFailure((e as Error).message)}}
   const shown=(cameras||[]).filter(c=>!selected.length||selected.includes(String(c.camera_id)));
   return <><div className="page-title"><div className="eyebrow">СИНХРОННОЕ НАБЛЮДЕНИЕ</div><h1>Камеры</h1><p>Единое время и идентификаторы из результатов алгоритма</p></div>
     {(error||failure)&&<Alert color="red" mb="md">{error||failure}</Alert>}
-    <Group className="toolbar" justify="space-between"><Group><MultiSelect aria-label="Фильтр камер" placeholder="Все камеры" data={(cameras||[]).map(c=>({value:String(c.camera_id),label:c.name}))} value={selected} onChange={setSelected}/><NumberInput aria-label="Фильтр Global ID" placeholder="Все Global ID" min={0} value={gid} onChange={setGid} w={160}/><Checkbox label="Bounding boxes" checked={boxes} onChange={e=>setBoxes(e.currentTarget.checked)}/></Group><Select aria-label="Сетка камер" w={130} value={columns} onChange={v=>setColumns(v||'2')} data={[{value:'2',label:'2 колонки'},{value:'3',label:'3 колонки'}]}/></Group>
+    <Group className="toolbar" justify="space-between"><Group><MultiSelect aria-label="Фильтр камер" placeholder="Все камеры" data={(cameras||[]).map(c=>({value:String(c.camera_id),label:c.name}))} value={selected} onChange={setSelected}/><NumberInput aria-label="Выбрать Global ID" placeholder="Все Global ID" min={0} value={gid} onChange={chooseGlobal} w={160}/><Checkbox label="Bounding boxes" checked={boxes} onChange={e=>setBoxes(e.currentTarget.checked)}/>{gid!==''&&<Text size="sm" c="blue">Выбран Global {gid} · видео с начала трека</Text>}</Group><Select aria-label="Сетка камер" w={130} value={columns} onChange={v=>setColumns(v||'2')} data={[{value:'2',label:'2 колонки'},{value:'3',label:'3 колонки'}]}/></Group>
     <Text size="xs" c="dimmed" mb="sm">Наблюдения в результате: {time(details?.summary.result_start)} — {time(details?.summary.result_end)}. Полная длительность видео может быть больше.</Text>
     <div className="camera-grid" style={{gridTemplateColumns:`repeat(${columns},minmax(0,1fr))`}}>{shown.map(c=><CameraPanel key={c.camera_id} camera={c} dataset={id} clock={clock} playing={playing} boxes={boxes} globalId={gid===''?null:Number(gid)} onError={message=>{setPlaying(false);setFailure(message)}}/>)}</div>
     {!cameras?.length&&<div className="empty">Подключите видео или загрузите результаты с Camera ID</div>}

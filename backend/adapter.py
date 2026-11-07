@@ -80,8 +80,11 @@ def build_index(folder: Path, database: Path, supplied_cameras: list[dict]):
             raise ValueError(f'manifest.json: неверный тип поля {key}')
     if any(not isinstance(item,dict) for item in manifest.get('inputs', [])):
         raise ValueError('manifest.json: inputs должен содержать объекты')
-    if not isinstance(manifest.get('tracking_config',{}).get('camera_sources',{}),dict):
+    tracking_config = manifest.get('tracking_config', {})
+    if not isinstance(tracking_config.get('camera_sources',{}),dict):
         raise ValueError('manifest.json: camera_sources должен быть объектом')
+    if not isinstance(tracking_config.get('camera_offsets_s',{}),dict):
+        raise ValueError('manifest.json: camera_offsets_s должен быть объектом')
     if not isinstance(config.get('camera_offset',[]),list) or any(not isinstance(v,str) for v in config.get('camera_offset',[])):
         raise ValueError('config.yaml: camera_offset должен быть массивом строк camera=seconds')
     warnings = []
@@ -117,10 +120,19 @@ def build_index(folder: Path, database: Path, supplied_cameras: list[dict]):
                         raise ValueError(f'{name}: {key} должен быть объектом')
     cameras = {int(c['camera_id']): dict(c) for c in supplied_cameras}
     offsets = {}
+    for camera, seconds in tracking_config.get('camera_offsets_s', {}).items():
+        value = finite(seconds)
+        if value is None:
+            raise ValueError('manifest.json: camera_offsets_s должен содержать числа')
+        offsets[int(camera)] = value
     for entry in config.get('camera_offset', []):
         camera, seconds = entry.split('=', 1)
         offsets[int(camera)] = finite(seconds)
-    sources = manifest.get('tracking_config', {}).get('camera_sources', {})
+    sources = tracking_config.get('camera_sources', {})
+    office_names = {int(camera): Path(name).name.lower() for camera, name in sources.items()}
+    if not offsets and office_names == {camera: f'camera_new_{camera+1}.mkv' for camera in range(5)}:
+        offsets = dict(enumerate((0., 1., 1., 4., 3.)))
+        warnings.append('Применена синхронизация времени офисных камер 0/1/1/4/3 с')
     for camera, name in sources.items():
         path = Path(name)
         path = (ROOT/path).resolve() if not path.is_absolute() else path.resolve()

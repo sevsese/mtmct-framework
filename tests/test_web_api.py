@@ -107,3 +107,17 @@ def test_mapping_without_observations_keeps_missing_counts_unknown(client):
     assert summary['global_tracks']==1 and summary['local_tracklets']==2
     assert summary['observations'] is None and summary['cameras']==2
     assert client.get(base+'/tracks/7').json()['observations_count'] is None
+
+
+def test_manifest_camera_offset_sets_global_observation_time(client):
+    manifest={'schema_version':'mtmct-cache-v1','cameras':[3],
+              'tracking_config':{'camera_offsets_s':{'3':4}}}
+    tracklets=[{'camera_id':3,'local_id':1,'fps':20}]
+    response=upload(client,'camera_id,frame_id,local_id,x1,y1,x2,y2,confidence,global_id\n3,20,1,1,2,11,22,0.9,7\n',files=[
+        ('files',('manifest.json',json.dumps(manifest),'application/json')),
+        ('files',('local_tracklets.json',json.dumps(tracklets),'application/json')),
+    ])
+    assert response.status_code==200,response.text
+    base=f"/api/datasets/{response.json()['id']}"
+    assert client.get(base+'/cameras').json()[0]['offset']==4
+    assert client.get(base+'/observations').json()['items'][0]['timestamp']==5

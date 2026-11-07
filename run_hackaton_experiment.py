@@ -80,6 +80,7 @@ def main():
         write_config(out, {"dataset": "hackaton", "cameras": list(sources),
                            "duration_seconds": DURATION_SECONDS, "frame_stride": FRAME_STRIDE,
                            "tracker": str(TRACKER), "conf": CONF,
+                           "camera_offset": [f"{camera}={seconds}" for camera, seconds in CAMERA_OFFSETS_SECONDS.items()],
                            "geometry": False, "metrics": False})
         track(VIDEO_DIR, out, MODEL, "osnet", None, DEVICE, 0, FRAME_STRIDE, 5,
               IMGSZ, CONF, reid_model=REID_MODEL, cameras=list(sources),

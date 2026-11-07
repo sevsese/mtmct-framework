@@ -18,7 +18,8 @@ export function useApi<T=any>(url:string|null,revision=0,keepPrevious=false){
 export const color=(id:number|null)=>id===null?'#aab4c5':`hsl(${((id*137.508)%360+360)%360} 78% 67%)`;
 export const time=(seconds:number|null|undefined)=>seconds==null?'Нет данных':`${seconds<0?'-':''}${Math.floor(Math.abs(seconds)/60).toString().padStart(2,'0')}:${(Math.abs(seconds)%60).toFixed(1).padStart(4,'0')}`;
 export function cameraTime(globalTime:number,camera:Pick<Camera,'offset'|'duration'>){const local=globalTime-camera.offset;return {local:Math.max(0,Math.min(local,camera.duration??Infinity)),active:local>=0&&(camera.duration==null||local<camera.duration)}}
-export const shouldSeekVideo=(current:number,target:number,playing:boolean)=>Math.abs(current-target)>(playing?.75:.04);
+export const shouldSeekVideo=(current:number,target:number,playing:boolean)=>Math.abs(current-target)>(playing?.3:.04);
+export const videoPlaybackRate=(current:number,target:number)=>target-current>.05?1.05:current-target>.05?.95:1;
 export function observationsAtFrame(samples:Observation[],frame:number,fps:number){
   const limit=Math.max(1,Math.ceil(fps*.12)),tracks=new Map<number,{before?:Observation;after?:Observation}>();
   for(const sample of samples){const delta=sample.frame_id-frame;if(Math.abs(delta)>limit)continue;const pair=tracks.get(sample.local_id)||{};if(delta<=0&&(!pair.before||sample.frame_id>pair.before.frame_id))pair.before=sample;if(delta>=0&&(!pair.after||sample.frame_id<pair.after.frame_id))pair.after=sample;tracks.set(sample.local_id,pair)}

@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { cameraTime,color,observationsAtFrame,shouldSeekVideo,time } from './api';
+import { cameraTime,color,observationsAtFrame,shouldSeekVideo,time,videoPlaybackRate } from './api';
 describe('Video time and identity presentation',()=>{
   it('applies offset once and clamps recordings with different durations',()=>{
     expect(cameraTime(12,{offset:2,duration:20})).toEqual({local:10,active:true});
@@ -12,9 +12,12 @@ describe('Video time and identity presentation',()=>{
     expect(time(null)).toBe('Нет данных');expect(time(61.5)).toBe('01:01.5');
   });
   it('does not repeatedly reset the decoder for small playback drift',()=>{
-    expect(shouldSeekVideo(10,10.3,true)).toBe(false);
-    expect(shouldSeekVideo(10,11,true)).toBe(true);
+    expect(shouldSeekVideo(10,10.2,true)).toBe(false);
+    expect(shouldSeekVideo(10,10.4,true)).toBe(true);
     expect(shouldSeekVideo(10,10.1,false)).toBe(true);
+    expect(videoPlaybackRate(10,10.2)).toBe(1.05);
+    expect(videoPlaybackRate(10.2,10)).toBe(.95);
+    expect(videoPlaybackRate(10,10.01)).toBe(1);
   });
   it('interpolates sparse tracking results without holding stale boxes',()=>{
     const sample=(frame_id:number,x:number)=>({camera_id:0,frame_id,local_id:1,global_id:7,timestamp:frame_id/25,bbox:[x,0,x+10,20],confidence:.9});
