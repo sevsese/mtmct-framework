@@ -7,9 +7,12 @@ __pycache__/
 venv/
 
 # Local models, datasets and generated artifacts
-data/
+data/*
+!data/README.md
 runs/
-weights/
+run/*/
+weights/*
+!weights/README.md
 *.pt
 *.pth
 *.mp4
@@ -28,3 +31,13 @@ frontend/playwright-report/
 .pnpm-store/
 mtmct.zip
 baseline_wildtrack_v2_metrics.json
+
+# Local checks and scratch files are not published
+tests/
+.github/workflows/
+frontend/e2e/
+frontend/src/*.test.*
+frontend/playwright.config.ts
+.tmp-*/
+exports/
+*.zip

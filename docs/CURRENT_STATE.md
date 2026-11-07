@@ -107,8 +107,14 @@ GT подтверждает за первые 900 кадров: камера 3 �
 | Oracle Tracklets и зафиксированный baseline | отсутствует |
 | Quality-aware ReID, refinement, memory, correction | отсутствуют |
 | Complete-link hard constraints | частично существуют в baseline matcher |
-| Camera offsets/topology/CITIC/WILDTRACK | отсутствуют |
+| Camera offsets/topology/CITIC/WILDTRACK | частично: offsets есть; verified overlap-топология в `configs/camera_topology.json`; CITIC/WILDTRACK не проверены |
 | Опциональная геометрия | существует, выключена по умолчанию в общем CLI |
+| Временные ReID-галереи (early/middle/late, независимые кадры) | существует за флагом `temporal_gallery_enabled` (план 2.0, этап 2) |
+| Взаимно-однозначное сопоставление на overlap-парах | существует за флагами `overlap_matching_enabled`/`mutual_matching_enabled` (этап 3) |
+| Три уровня решений confirmed/provisional/rejected + гипотезы без DSU-merge | существует за флагами (этап 4); provisional в `association_hypotheses.json` |
+| Диагностика рёбер (initial_reason, overlap, конкуренты, evidence) и run_config с git SHA | существует (этап 5) |
+| Ручные правки изолированы от автоматического ядра | `experiments/office_pass.py`, ленивый импорт в раннере (этап 5) |
+| Абляция 4 конфигураций на сохранённых признаках | `scripts/association_ablation.py` (этап 6) |
 
 ## Технический долг и непроверенное
 

@@ -17,14 +17,9 @@ dependencies = [
   "ijson>=3.3",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest>=8"]
-
 [project.scripts]
 mtmct = "mtmct.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["mtmct*"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]

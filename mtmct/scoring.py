@@ -55,26 +55,42 @@ class Evidence:
         return vector if vector.ndim == 1 and np.isfinite(vector).all() and np.any(vector) else np.empty(0)
 
     @cached_property
-    def prototypes(self):
+    def usable_samples(self):
+        """One quality policy for prototypes, gallery scoring and evidence gates."""
         samples = []
-        vectors = self.row.get("feature_vectors") or []
-        qualities = self.row.get("feature_quality") or []
-        frames = self.row.get("feature_frames") or []
+        details = self.row.get('feature_quality_details') or []
+        for i, (v, q, f) in enumerate(zip(self.row.get('feature_vectors') or [],
+                                        self.row.get('feature_quality') or [],
+                                        self.row.get('feature_frames') or [])):
+            e = unit(v)
+            q = float(q) * (1 - .5 * (details[i].get('occlusion_proxy', 0.) if i < len(details) else 0.))
+            if (e.ndim == 1 and e.size and np.isfinite(e).all() and np.any(e)
+                    and 0 < q <= 1 and (not samples or e.shape == samples[0][0].shape)):
+                samples.append((e, q, int(f), i))
+        best = max((s[1] for s in samples), default=0.)
+        return [s for s in samples if s[1] >= max(.2, .35 * best)]
+
+    @cached_property
+    def temporal_gallery(self):
+        samples = sorted({s[2]:s for s in self.usable_samples}.values(), key=lambda s:s[2])
+        result = {}
+        for name, indexes in zip(('early','middle','late'), np.array_split(np.arange(len(samples)),3)):
+            if not len(indexes):
+                continue
+            group = [samples[i] for i in indexes]
+            vector = unit(np.average([s[0] for s in group],axis=0,weights=[s[1] for s in group]))
+            result[name] = dict(vector=vector.tolist(),quality=float(np.mean([s[1] for s in group])),
+                independent_frames=len(group), spread=float(np.mean([1-np.dot(s[0],vector) for s in group])),
+                start_s=self.time(group[0][2]),end_s=self.time(group[-1][2]))
+        return result
+
+    @cached_property
+    def prototypes(self):
         details = self.row.get("feature_quality_details") or []
-        for i, (vector, quality, frame) in enumerate(zip(vectors, qualities, frames)):
-            e = unit(vector)
-            q = float(quality)
-            if i < len(details):
-                q *= 1 - .5 * details[i].get("occlusion_proxy", 0.)
-            if e.ndim != 1 or not e.size or not np.isfinite(e).all() or not np.any(e) or not 0 < q <= 1:
-                continue
-            if samples and e.shape != samples[0][0].shape:
-                continue
-            samples.append((e, q, int(frame), i))
+        samples = self.usable_samples
         if not samples:
             return []
-        best = max(sample[1] for sample in samples)
-        pool = [sample for sample in samples if sample[1] >= .6 * best]
+        pool = list(samples)
         chosen = []
         while pool and len(chosen) < 4:
             def priority(sample):
@@ -114,21 +130,28 @@ class Evidence:
                       for frame, x, y in self.row.get("positions", ()) if math.isfinite(x) and math.isfinite(y))
 
 
-def appearance(a, b, cfg, gallery="topk"):
+def appearance(a, b, cfg, gallery="topk", temporal=False):
     values = []
     top3 = None
     if a.mean.size and a.mean.shape == b.mean.shape:
         values.append(("mean", float(a.mean @ b.mean), 1 - cfg.gallery_weight))
     if gallery != "mean" and a.prototypes and b.prototypes:
         def usable(track):
-            vectors=track.row.get('feature_vectors',[])
-            qualities=track.row.get('feature_quality',[])
-            best=max(qualities,default=0.)
-            samples=[unit(v) for v,q in zip(vectors,qualities) if q>=max(.2,.35*best)]
-            return np.array(samples or [p['e'] for p in track.prototypes])
+            return np.array([s[0] for s in track.usable_samples])
         left, right = usable(a), usable(b)
         if left.shape[1] == right.shape[1]:
-            scores = (left @ right.T).ravel()
+            matrix = left @ right.T
+            scores = matrix.ravel()
+            if temporal:
+                used_left, used_right, selected = set(), set(), []
+                for flat in np.argsort(-scores):
+                    i,j = np.unravel_index(flat, matrix.shape)
+                    fi,fj = a.usable_samples[i][2],b.usable_samples[j][2]
+                    if fi in used_left or fj in used_right:
+                        continue
+                    used_left.add(fi); used_right.add(fj)
+                    selected.append(float(matrix[i,j]))
+                scores = np.asarray(selected)
             top3 = float(np.sort(scores)[-min(3, len(scores)):].mean())
             similarity = float(scores.max()) if gallery == "max" else top3
             values.append(("gallery", similarity, cfg.gallery_weight))
@@ -151,6 +174,17 @@ def appearance(a, b, cfg, gallery="topk"):
     details = {name: score for name, score, _ in values}
     if top3 is not None:
         details["gallery_top3"] = top3
+        if temporal:
+            details['independent_support_frames'] = min(3,len(scores))
+            comparisons = {}
+            for na,ga in a.temporal_gallery.items():
+                for nb,gb in b.temporal_gallery.items():
+                    if len(ga['vector']) == len(gb['vector']):
+                        comparisons[na+'_'+nb] = float(np.dot(ga['vector'],gb['vector']))
+            details['temporal_parts'] = comparisons
+            if comparisons:
+                details['temporal_similarity'] = max(comparisons.values())
+            details['early_similarity'] = comparisons.get('early_early')
     if parts:
         details["parts"] = float(np.mean(sorted(parts)[-3:]))
         similarity = (1 - cfg.part_weight) * similarity + cfg.part_weight * details["parts"]
@@ -186,12 +220,13 @@ def same_view_continuity(a, b, mean):
                 return None
         return "shadowed_duplicate" if duplicate else "overlapping_handoff"
     gap = b.interval[0] - a.interval[1]
-    if not 0 < gap <= 1.8 or mean < (.62 if gap <= .50 else .74) or not left or not right:
+    if not 0 < gap <= 1.8 or mean < (.62 if gap <= .50 else .70) or not left or not right:
         return None
     x, y = np.array(left[max(left, key=int)]), np.array(right[min(right, key=int)])
     h = max(x[3]-x[1], y[3]-y[1], 1.)
     center_x, center_y = (x[:2]+x[2:])/2, (y[:2]+y[2:])/2
-    if np.linalg.norm(center_x-center_y) <= h * (.30 + .45*gap):
+    # A longer seam needs a tighter displacement bound, not a global ReID relaxation.
+    if np.linalg.norm(center_x-center_y) <= h * (.30 + .20*gap):
         return "short_gap_recovery"
     return None
 
@@ -257,7 +292,8 @@ def physical(a, b, cfg):
         if overlap and pair in topology.disjoint_pairs:
             conflict = "disjoint_cameras_simultaneous"
         elif overlap and topology.allows_overlap(*pair):
-            dt_cost, dt_reliability, status = 0., .75, "overlap"
+            # Permission to co-occur is not a measurement of correspondence.
+            status = "overlap"
         elif not overlap:
             transition = topology.evaluate(a.key[0], b.key[0], gap)
             if transition.status == "forbidden":
@@ -280,8 +316,8 @@ def physical(a, b, cfg):
     }
 
 
-def score(a, b, cfg, context, gallery="topk"):
-    similarity, details = appearance(a, b, cfg, gallery)
+def score(a, b, cfg, context, gallery="topk", temporal=False):
+    similarity, details = appearance(a, b, cfg, gallery, temporal=temporal)
     distances = {
         "appearance": None if similarity is None else (1 - similarity) / 2,
         "spatial": context["spatial"], "temporal": context["temporal"],

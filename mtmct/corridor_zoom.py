@@ -136,8 +136,11 @@ class ZoomTracker:
             foot_y = combined[:,3]
             combined = combined[~((foot_x >= left) & (foot_x <= right) &
                                   (foot_y >= top) & (foot_y <= bottom))]
-        combined = suppress_body_parts(filter_person_size(combined, frame.shape, self.minimum))
+        combined = filter_person_size(combined, frame.shape, self.minimum)
         combined = reject_group_boxes(combined, [t.xyxy for t in self.tracker.tracked_stracks if t.is_activated])
+        # Remove a composite crop before containment suppression can discard
+        # the two valid person boxes inside it.
+        combined = suppress_body_parts(combined)
         self.zoom_seconds += time.perf_counter()-started
         for name,boxes in (("full",full),("fused",combined)):
             for box in boxes:

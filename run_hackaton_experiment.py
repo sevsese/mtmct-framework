@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from mtmct.association import Config
-from mtmct.identity_v2 import OFFICE_SETTINGS
+from mtmct.identity_v2 import OFFICE_SETTINGS, PLAN_SETTINGS
 from mtmct.cache import write_config
 from mtmct.floor_map import build_floor_tracks, render_floor_tracks
 from mtmct.link import run as link
@@ -16,10 +16,16 @@ from mtmct.tracking import run as track
 from mtmct.visualize import render
 from mtmct.association import save_mapping
 from mtmct.export import export_predictions
-from mtmct.office_pass import apply_pass, apply_frame_review, fit_projection, tracks, remove_review_duplicates, draw_pass
 from mtmct.office_routes import map_office_routes
 from mtmct.office_walls import render as render_walls
 from mtmct.floor_map import _read_image
+
+
+def _review_tools():
+    """Lazy import: manual review rules are experiment-only, never automatic."""
+    from experiments.office_pass import (apply_pass, apply_frame_review, fit_projection,
+                                         tracks, remove_review_duplicates, draw_pass)
+    return apply_pass, apply_frame_review, fit_projection, tracks, remove_review_duplicates, draw_pass
 
 
 ROOT = Path(__file__).resolve().parent
@@ -43,7 +49,9 @@ MIN_SIMILARITY = 0.45      # combined OSNet gallery + upper/lower colour gate
 GLOBAL_MAX_GAP_SECONDS = 60.0
 CAMERA_FPS = {0: 25.0, 1: 25.0, 2: 25.0, 3: 20.0, 4: 25.0}
 CAMERA_OFFSETS_SECONDS = {0: 0.0, 1: 1.0, 2: 1.0, 3: 4.0, 4: 3.0}
-TOPOLOGY = ROOT / "configs" / "hackaton_office_topology.json"
+# Plan 2.0: only verified overlapping view pairs; other pairs stay unknown.
+TOPOLOGY = ROOT / "configs" / "camera_topology.json"
+V2_SETTINGS = PLAN_SETTINGS   # OFFICE_SETTINGS воспроизводит старое поведение v2
 FLOOR_PLAN = Path.home() / "Downloads" / "office_camera.png"
 FLOOR_CALIBRATION = ROOT / "configs" / "hackaton_office_map_approx.json"
 GALLERY_WEIGHT = 0.65      # best quality view + whole-track mean
@@ -102,7 +110,7 @@ def main(duration_seconds=DURATION_SECONDS, matcher="v2"):
                  use_geometry=False, use_time=True)
     tracklets, mapping, _, predictions, _ = link(
         out, cfg, matcher=matcher, allow_same_camera_fragments=True, memory=False,
-        v2_settings=OFFICE_SETTINGS if matcher == "v2" else None,
+        v2_settings=V2_SETTINGS if matcher == "v2" else None,
         repair_occlusions=matcher == "v2",
         min_observations=MIN_OBSERVATIONS)
     finish(out,sources,tracklets,mapping,predictions,duration_seconds, matcher == "graph")
@@ -112,6 +120,7 @@ def finish(out,sources,tracklets,mapping,predictions,duration_seconds=DURATION_S
     base=REVIEW_REFERENCE/"wall_map_points"/"wall_anchors.json"
     reviewed_map=None
     if review and duration_seconds == DURATION_SECONDS and base.is_file() and (REVIEW_REFERENCE/"global_tracks_2d.csv").is_file():
+        apply_pass, apply_frame_review, fit_projection, tracks, remove_review_duplicates, draw_pass = _review_tools()
         reference=tracks(REVIEW_REFERENCE/"global_tracks_2d.csv")
         reviewed_map,projection=fit_projection(reference,json.loads(base.read_text()),
                                                CAMERA_FPS,CAMERA_OFFSETS_SECONDS)
@@ -157,7 +166,7 @@ def finish(out,sources,tracklets,mapping,predictions,duration_seconds=DURATION_S
                scale=RENDER_SCALE, cameras=list(sources), camera_sources=sources,
                duration_seconds=duration_seconds,camera_offsets_s=CAMERA_OFFSETS_SECONDS)
     print(f"DONE: {out}")
-    print(f"Global tracks: {len(report)} (manual expectation: 5); no GT metrics were calculated.")
+    print(f"Global tracks: {len(report)}; no GT metrics were calculated.")
     for row in report:
         print(f"  GLOBAL {row['global_id']}: cameras {row['camera_sequence']}, "
               f"{row['start_s']:.1f}-{row['end_s']:.1f}s")

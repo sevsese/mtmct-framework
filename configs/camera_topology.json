@@ -1,0 +1,6 @@
+{
+  "description": "Zero-based camera IDs. Verified pairs 1-2 and 4-5; remaining relationships are unknown.",
+  "overlap_pairs": [[0, 1], [3, 4]],
+  "disjoint_pairs": [],
+  "routes": []
+}

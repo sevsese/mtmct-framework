@@ -497,3 +497,108 @@ quality-default; для более слабых GPU остаётся явный 
 
 Артефакт: `runs/recall_best_1536_900/` (не добавляется в Git).
 
+
+
+## План 2.0 — temporal galleries, overlap matching, три уровня решений
+
+Статус: **CODE PASS — unit/ablation готовы; 3-минутный GPU-тест см. ниже**
+
+Реализация «Итогового плана доработки MTMCT Framework 2.0» (shared-чат
+ChatGPT, 2026-11-06). Система не переписывалась: новые механизмы включены
+флагами в `Settings`; при выключенных флагах поведение v2 воспроизводится
+(защищено существующим набором тестов и отдельным регрессионным тестом).
+
+1. Этап 1: `configs/camera_topology.json` — только подтверждённые
+   пересечения полей зрения `[[0,1],[3,4]]`; прочие пары — unknown, а не
+   disjoint. CLI `mtmct.link`: `--camera-topology`, `--overlap-matching`,
+   `--overlap-bonus`, `--overlap-bonus-weight` (default 0.05, экспериментально),
+   `--mutual-matching`, `--temporal-gallery`.
+2. Этап 2: `Evidence.temporal_gallery` (early/middle/late с качеством,
+   числом независимых кадров и разбросом); gallery top-k засчитывает один
+   исходный кадр один раз (`independent_support_frames`); диагностика
+   `temporal_similarity`, `early_similarity`, `feature_spread`.
+3. Этап 3: новый `mtmct/overlap_matching.py` — матрица совместимости по
+   синхронным трекам verified overlap-пар, Hungarian с фиктивной колонкой
+   «нет пары», проверка отрыва от альтернатив (неоднозначное → гипотеза),
+   опциональный mutual-best фильтр. Бонус ограничен и не считается
+   доказательством сам по себе.
+4. Этап 4: стадия overlap-matching между seeds и attachment; решения
+   confirmed/provisional/rejected; provisional-связи не делают `unite` в DSU
+   (гипотезы отдельно), подтверждение требует среднее сходство не ниже
+   `cross_camera_gallery`; конфликты компонентов проверяются
+   `_conflict_details` (hard veto + устойчивое слабое сходство mean и
+   gallery < 0.55); мягкие отрицательные свидетельства фиксируются в
+   диагностике без превращения в cannot-link.
+5. Этап 5: расширенная диагностика рёбер (`initial_reason`, `overlap`,
+   `competing_candidates`, `evidence_sources`); `association_hypotheses.json`;
+   `run_config.json` с git SHA и camera topology; ручные правки перенесены
+   `mtmct/office_pass.py → experiments/office_pass.py` (импорт в раннере
+   ленивый, автоматический v2-путь их не вызывает).
+6. Этап 6: тесты `tests/test_temporal_gallery.py`,
+   `tests/test_overlap_matching.py`, `tests/test_identity_v2_decisions.py`;
+   скрипт `scripts/association_ablation.py` — 4 конфигурации ассоциации
+   (baseline / temporal / overlap / full) на сохранённом кэше признаков без
+   повторного запуска нейросетей.
+
+Проверки: полный pytest — **144 passed, 1 skipped** (`neuro_clean`,
+включая регрессионные тесты на пустые временные части галерей и на
+невыполнимую матрицу назначения);
+абляция на `runs/hackaton_5cam_60s_corridor_v13`:
+baseline 12 ID → overlap/full 11 ID + 1 provisional-гипотеза
+(overlap-пара cam0/cam1 со слабым ReID получает поддерживаемую гипотезу
+`overlap_mutual_best` вместо молчаливого отказа). Топология без routes
+осознанно разъединяет ранее поддерживаемые цепочки (например cam2 L16/L17) —
+принятый компромисс «unknown ≠ disjoint».
+
+Артефакты: `runs/ablation_hackaton_60s_plan_v1/comparison.json`,
+`configs/ablation_cases_hackaton_60s.json`.
+
+Команда 3-минутного теста (5 камер, 180 с, новые механизмы включены):
+
+```powershell
+conda activate neuro_clean
+python -u run_hackaton_experiment.py --seconds 180 --run-name hackaton_5cam_180s_v1
+```
+
+Результат теста и сверка — в следующем разделе.
+
+
+## Результат 3-минутного теста `hackaton_5cam_180s_v1`
+
+Статус: **PASS** (inference + association + mosaic end-to-end).
+
+- Tracking: 5 камер × 180 с (stride 2, yolo26l + bytetrack + osnet_ibn_x1_0),
+  63 tracklets, ~9.6–10.9 FPS на камеру, peak CUDA tensor VRAM ≤ 0.77 GiB.
+- Association (v2, PLAN_SETTINGS + camera_topology.json): **29 Global ID,
+  3 provisional-гипотезы** (`association_hypotheses.json`).
+- Стадия overlap-matching подтвердила 2 связи (`overlap_mutual_best`),
+  2 оставила неоднозначными (`overlap_ambiguous`), 1 умеренную — гипотезой.
+- Диагностика рёбер: 321 отказ `weak_cross_camera_reid` теперь виден
+  поимённо (раньше молчаливо), 11 seed-подтверждений, 4 short_gap_recovery,
+  25 artifact-карантинов.
+- `identity_state.json → config` содержит git SHA, полную топологию и флаги
+  механизмов (проверено этапом 5).
+
+Абляция на кэше 180 с (`runs/ablation_hackaton_180s_plan_v1/comparison.json`):
+
+| Вариант | Global ID | Гипотезы |
+|---|---:|---:|
+| 1 baseline (флаги выключены) | 28 | 0 |
+| 2 temporal galleries | 31 | 0 |
+| 3 overlap matching | 27 | 3 |
+| 4 full | 29 | 3 |
+
+Честные ограничения этого прогона:
+
+- 29 ID против ~9 реальных людей — пересегментация от слабого cross-camera
+  ReID и минимальной топологии (unknown ≠ disjoint). Новые механизмы
+  превращают часть молчаливых отказов в гипотезы, но не «дожимают» счётчик.
+- Вариант 2 (temporal) на этом кэше ухудшил счётчик (+3): стартовый вес
+  temporal-gallery 0.15 не аблирован. План допускает подбор коэффициентов
+  только после абляций на независимой валидации — пока значение зафиксировано.
+- Подтверждение гипотез (3 шт.) и добор измеренных маршрутов из данных —
+  следующие рычаги по плану, не пороговая подгонка.
+
+Ключевые артефакты: `runs/hackaton_5cam_180s_v1/{mosaic.mp4,
+global_tracks_summary.json, association_edges.json,
+association_hypotheses.json, identity_state.json, floor_tracks.png}`.
