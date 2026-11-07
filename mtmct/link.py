@@ -18,19 +18,33 @@ def run(run_dir: Path, cfg: Config, scene_id: int = 0,
         expected_detector: str | None = None, matcher: str = "baseline",
         allow_same_camera_fragments: bool = False, memory: bool = False,
         memory_similarity: float = 0.9, correct_identities: bool = False,
-        repair_occlusions: bool = False, repair_config: RepairConfig | None = None):
+        repair_occlusions: bool = False, repair_config: RepairConfig | None = None,
+        min_observations: int = 1):
     manifest = validate_cache(run_dir, expected_detector)
     if manifest.get("legacy"):
         print("WARNING:", manifest["warning"])
-    tracklets=load_tracklets(run_dir/"local_tracklets.json")
-    suppressed = set()
+    if min_observations < 1:
+        raise ValueError("min_observations must be positive")
+    all_tracklets=load_tracklets(run_dir/"local_tracklets.json")
+    def observation_count(row):
+        frames = row.get("observation_frames")
+        return len(frames) if frames is not None else 1
+
+    suppressed = {
+        (int(row["camera_id"]), int(row["local_id"]))
+        for row in all_tracklets
+        if observation_count(row) < min_observations
+    }
+    tracklets = [row for row in all_tracklets
+                 if (int(row["camera_id"]), int(row["local_id"])) not in suppressed]
     observations = None
     repair_log = None
     if repair_occlusions:
         repair_config = repair_config or RepairConfig()
         observations = read_observations(run_dir / "observations.csv")
-        tracklets, suppressed, duplicates = find_duplicate_tracklets(
+        tracklets, duplicate_keys, duplicates = find_duplicate_tracklets(
             tracklets, observations, repair_config)
+        suppressed.update(duplicate_keys)
         repair_log = {"experimental": True, "settings": asdict(repair_config),
                       "suppressed_duplicates": duplicates}
     if matcher == "graph":
@@ -48,7 +62,7 @@ def run(run_dir: Path, cfg: Config, scene_id: int = 0,
             encoding="utf-8")
     if memory:
         mapping,records,memory_decisions=apply_memory(
-            tracklets,mapping,similarity_threshold=memory_similarity)
+            tracklets,mapping,similarity_threshold=memory_similarity,config=cfg)
         (run_dir/"global_memory.json").write_text(
             __import__("json").dumps({"groups":records,"decisions":memory_decisions},indent=2),
             encoding="utf-8")
@@ -90,8 +104,14 @@ def main():
                    help="Ignore projected positions until calibration has been validated")
     p.add_argument("--model",default=None,help="Reject cache created with another detector")
     p.add_argument("--matcher",choices=["baseline","graph"],default="baseline")
-    p.add_argument("--allow-same-camera-fragments",action="store_true")
-    p.add_argument("--time",action="store_true",help="Enable time constraints for graph matcher")
+    p.add_argument("--allow-same-camera-fragments",action=argparse.BooleanOptionalAction,
+                   default=True)
+    p.add_argument("--time",action=argparse.BooleanOptionalAction,default=True,
+                   help="Enable time constraints (use --no-time only for diagnostics)")
+    p.add_argument("--gallery-weight",type=float,default=0.65)
+    p.add_argument("--part-weight",type=float,default=0.30)
+    p.add_argument("--min-observations",type=int,default=3,
+                   help="Suppress very short unconfirmed local tracks")
     p.add_argument("--memory",action="store_true",help="Enable offline prototype memory")
     p.add_argument("--memory-similarity",type=float,default=0.90)
     p.add_argument("--camera-offset",action="append",default=[],metavar="CAMERA=SECONDS")
@@ -104,17 +124,18 @@ def main():
                max_speed_mps=a.max_speed,overlap_distance_m=a.max_overlap_distance,
                appearance_weight=a.appearance_weight,spatial_weight=a.spatial_weight,
                temporal_weight=a.temporal_weight,fps=a.fps,
+               gallery_weight=a.gallery_weight,part_weight=a.part_weight,
                require_geometry=a.require_geometry,
                use_geometry=not a.ignore_geometry,
-               use_time=True if a.matcher=="baseline" else a.time,
+               use_time=a.time,
                camera_offsets_s=parse_offsets(a.camera_offset),
                transition_model=CameraTransitionModel.from_json(a.topology) if a.topology else None)
-    if a.matcher=="graph" and not a.time:
+    if not a.time:
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,out_csv,out_txt=run(
         a.run_dir,cfg,a.scene_id,a.model,a.matcher,a.allow_same_camera_fragments,
         a.memory,a.memory_similarity,a.correct_identities,
-        repair_occlusions=a.repair_occlusions)
+        repair_occlusions=a.repair_occlusions,min_observations=a.min_observations)
     accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher=="graph" else len(edges)
     print(f"Local tracklets: {len(tracklets)}, accepted edges: {accepted}, global IDs: {len(set(mapping.values()))}")
     print("Results:", out_csv, out_txt)

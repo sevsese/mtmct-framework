@@ -1,12 +1,14 @@
 """One-command MTMCT pipeline for the validated Warehouse_000 camera pair."""
 from __future__ import annotations
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from .association import Config
 from .download import download
 from .link import run as link_run
+from .part_features import attach_body_parts
 from .cache import write_config
 from .time_sync import CameraTransitionModel, parse_offsets
 from .tracking import run
@@ -30,14 +32,20 @@ def main():
     p.add_argument("--device",default="cuda:0")
     p.add_argument("--max-frames",type=int,default=900,help="0 = full videos")
     p.add_argument("--imgsz",type=int,default=1920)
-    p.add_argument("--conf",type=float,default=0.10)
-    p.add_argument("--tracker",default="bytetrack.yaml")
+    p.add_argument("--conf",type=float,default=0.03)
+    p.add_argument("--tracker",default=str(Path(__file__).with_name("bytetrack_recall.yaml")))
     p.add_argument("--sample-every",type=int,default=5)
     p.add_argument("--min-similarity",type=float,default=0.80)
     p.add_argument("--max-cost",type=float,default=0.125)
     p.add_argument("--geometry",action="store_true",help="Use validated floor geometry")
-    p.add_argument("--time",action="store_true",help="Enable time constraints for graph matcher")
-    p.add_argument("--matcher",choices=["baseline","graph"],default="baseline")
+    p.add_argument("--time",action=argparse.BooleanOptionalAction,default=True,
+                   help="Enable time constraints (use --no-time only for diagnostics)")
+    p.add_argument("--matcher",choices=["baseline","graph"],default="graph")
+    p.add_argument("--allow-same-camera-fragments",action=argparse.BooleanOptionalAction,
+                   default=True)
+    p.add_argument("--gallery-weight",type=float,default=0.65)
+    p.add_argument("--part-weight",type=float,default=0.30)
+    p.add_argument("--min-observations",type=int,default=3)
     p.add_argument("--memory",action="store_true")
     p.add_argument("--memory-similarity",type=float,default=0.90)
     p.add_argument("--camera-offset",action="append",default=[],metavar="CAMERA=SECONDS")
@@ -84,19 +92,27 @@ def main():
         run(scene_dir,out,a.model,"osnet",None,a.device,a.max_frames,1,
             a.sample_every,a.imgsz,a.conf,reid_model=a.reid_model,cameras=a.cameras,tracker=a.tracker)
 
+    if a.part_weight > 0 and (out/"local_tracklets.json").is_file():
+        tracklets_path=out/"local_tracklets.json"
+        tracklets=json.loads(tracklets_path.read_text(encoding="utf-8"))
+        sources={camera:scene_dir/"videos"/f"Camera_{camera:04d}.mp4" for camera in a.cameras}
+        attach_body_parts(tracklets,out/"observations.csv",sources)
+        tracklets_path.write_text(json.dumps(tracklets),encoding="utf-8")
+
     cfg=Config(appearance_weight=0.95,spatial_weight=0.0 if not a.geometry else 0.20,
                temporal_weight=0.05,max_cost=a.max_cost,
                min_similarity=a.min_similarity,use_geometry=a.geometry,
-               use_time=True if a.matcher=="baseline" else a.time,
+               use_time=a.time,gallery_weight=a.gallery_weight,part_weight=a.part_weight,
                camera_offsets_s=parse_offsets(a.camera_offset),
                transition_model=CameraTransitionModel.from_json(a.topology) if a.topology else None)
-    if a.matcher=="graph" and not a.time:
+    if not a.time:
         cfg.temporal_weight=0.0
     tracklets,mapping,edges,predictions,_=link_run(
         out,cfg,expected_detector=None if a.link_only else a.model,matcher=a.matcher,
+        allow_same_camera_fragments=a.allow_same_camera_fragments,
         memory=a.memory,memory_similarity=a.memory_similarity,
         correct_identities=a.correct_identities,
-        repair_occlusions=a.repair_occlusions)
+        repair_occlusions=a.repair_occlusions,min_observations=a.min_observations)
     if not a.link_only or a.render_link_only:
         render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
     cross=sum(len({c for c,l in mapping if mapping[(c,l)]==gid})>1

@@ -26,7 +26,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
         imgsz: int, conf: float, reid_model: str = "osnet_x1_0",
         cameras: list[int] | None = None, tracker: str | Path = "bytetrack.yaml",
         camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0,
-        frame_ids: set[int] | None = None, max_seconds: float | None = None):
+        frame_ids: set[int] | None = None, max_seconds: float | None = None,
+        zoom_rois: dict | None = None, exclude_rois: dict | None = None):
     from ultralytics import YOLO
     if stride<1 or sample_every<1:
         raise ValueError("stride and sample_every must be positive")
@@ -55,9 +56,14 @@ def run(scene_dir: Path, output: Path, model_name: str,
     output.mkdir(parents=True,exist_ok=True)
     summaries=[]
     performance=[]
-    with open(output/"observations.csv","w",newline="",encoding="utf-8") as f:
+    source_fps={}
+    with open(output/"observations.csv","w",newline="",encoding="utf-8") as f, \
+         open(output/"tracking_diagnostics.csv","w",newline="",encoding="utf-8") as diagnostics:
         writer=csv.DictWriter(f,fieldnames=FIELDS)
         writer.writeheader()
+        diagnostic_writer=csv.DictWriter(
+            diagnostics,fieldnames=["camera_id","frame_id","tracker_boxes","assigned_ids"])
+        diagnostic_writer.writeheader()
         for cam, video in source_paths.items():
             H = calibration.get(cam)
             if H is None:
@@ -66,6 +72,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
             model = YOLO(model_name)  # independent ByteTrack instance per camera
             print(f'Processing camera {cam}: {video}', flush=True)
             video_fps = reader.fps
+            source_fps[cam] = video_fps
             camera_max_frames = (max(1, round(max_seconds * video_fps))
                                  if max_seconds is not None else max_frames)
             vw, vh = reader.dimensions()
@@ -81,11 +88,23 @@ def run(scene_dir: Path, output: Path, model_name: str,
                 torch.cuda.synchronize()
                 torch.cuda.reset_peak_memory_stats()
             started=time.perf_counter()
+            zoom = zoom_log = None
             try:
+                if cam in (zoom_rois or {}) or cam in (exclude_rois or {}):
+                    from .corridor_zoom import ZoomTracker
+                    zoom_log = (output/f"zoom_camera_{cam+1}.csv").open("w",newline="")
+                    zoom = ZoomTracker(model,(zoom_rois or {}).get(cam),tracker,zoom_log,(exclude_rois or {}).get(cam))
                 for fid, frame in reader.iter_frames(camera_max_frames, stride, frame_ids):
-                    result=model.track(frame,persist=True,tracker=str(tracker),
+                    result=zoom.step(frame,fid,imgsz,conf,device) if zoom else model.track(frame,persist=True,tracker=str(tracker),
                                        classes=[0],conf=conf,imgsz=imgsz,
                                        device=device,verbose=False)[0]
+                    box_count = (len(result.boxes.xyxy.cpu().numpy())
+                                 if result.boxes is not None else 0)
+                    assigned_count = (len(result.boxes.id.cpu().numpy())
+                                      if result.boxes is not None and result.boxes.id is not None else 0)
+                    diagnostic_writer.writerow({"camera_id":cam,"frame_id":fid,
+                                                "tracker_boxes":box_count,
+                                                "assigned_ids":assigned_count})
                     crops=[]; sampled_keys=[]
                     if result.boxes is not None and result.boxes.id is not None:
                         ids=result.boxes.id.int().cpu().numpy()
@@ -132,6 +151,11 @@ def run(scene_dir: Path, output: Path, model_name: str,
                     if fid%100==0:
                         print(f" camera={cam} frame={fid} tracks={len(by_id)}",flush=True)
             finally:
+                if zoom_log:
+                    zoom_log.close()
+                if zoom:
+                    (output/f"zoom_timing_{cam+1}.json").write_text(json.dumps({
+                        "frames":processed,"full_seconds":zoom.full_seconds,"additional_seconds":zoom.zoom_seconds}))
                 reader.close()
             if device.startswith("cuda"):
                 import torch
@@ -140,16 +164,28 @@ def run(scene_dir: Path, output: Path, model_name: str,
             peak_vram = round(torch.cuda.max_memory_allocated()/1024**3,2) if device.startswith("cuda") else None
             print(f"  processed={processed} frames in {seconds:.1f} s = "
                   f"{processed/max(seconds, 1e-6):.2f} processed FPS; peak CUDA tensor VRAM={peak_vram} GiB")
+            inference_fps=round(processed/max(seconds,1e-6),2)
             summaries_stats={"camera_id":cam,"processed_frames":processed,"seconds":round(seconds,2),
-                             "fps":round(processed/max(seconds,1e-6),2),"peak_cuda_tensor_gib":peak_vram}
+                             "source_fps":video_fps,"inference_fps":inference_fps,
+                             "fps":inference_fps,"peak_cuda_tensor_gib":peak_vram}
             performance.append(summaries_stats)
             for lid,track in by_id.items():
                 emb=track["embedding_sum"]
+                samples=track["feature_samples"]
+                if samples:
+                    qualities=np.asarray([max(float(row[0]),1e-6) for row in samples])
+                    weighted=np.average(np.asarray([row[2] for row in samples]),axis=0,weights=qualities)
+                else:
+                    weighted=emb
                 summaries.append({"camera_id":cam,"local_id":lid,
                                   "start_frame":int(track["start_frame"]),
                                   "end_frame":int(track["end_frame"]),
+                                  "start_s":float(track["start_frame"])/video_fps,
+                                  "end_s":float(track["end_frame"])/video_fps,
+                                  "source_fps":video_fps,
                                   "positions":track["positions"],
-                                  "embedding":normalized(emb).tolist() if emb is not None else [],
+                                  "embedding":normalized(weighted).tolist() if weighted is not None else [],
+                                  "embedding_mean":normalized(emb).tolist() if emb is not None else [],
                                   "feature_quality":[sample[0] for sample in track["feature_samples"]],
                                   "feature_frames":[sample[1] for sample in track["feature_samples"]],
                                   "feature_vectors":[sample[2] for sample in track["feature_samples"]],
@@ -174,9 +210,10 @@ def run(scene_dir: Path, output: Path, model_name: str,
         config={"max_frames":max_frames,"stride":stride,"sample_every":sample_every,
                 "imgsz":imgsz,"conf":conf,"tracker":str(tracker),"reid_method":reid_method,
                 "reid_model":reid_model,"camera_sources":{str(c):str(p) for c,p in source_paths.items()},
+                "source_fps":{str(c):fps for c,fps in source_fps.items()},
                 "fps_fallback":fps_fallback,
                 "frame_ids": sorted(frame_ids) if frame_ids is not None else None,
-                "max_seconds": max_seconds},
+                "max_seconds": max_seconds,"zoom_rois":zoom_rois,"exclude_rois":exclude_rois},
     )
     print(f"Wrote {len(summaries)} tracklets to {output/'local_tracklets.json'}")
 

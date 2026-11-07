@@ -184,6 +184,9 @@ def test_tracking_on_scout_frames_without_video_or_calibration(tmp_path, monkeyp
     assert len(tracklets)==2
     assert {t['camera_id'] for t in tracklets} == {0,1}
     assert not tracklets[0]['positions']
+    assert tracklets[0]['source_fps'] == 10
+    assert tracklets[0]['start_s'] == 0 and tracklets[0]['end_s'] == .1
+    assert (out/'tracking_diagnostics.csv').is_file()
     manifest=json.loads((out/'manifest.json').read_text())
     assert any(x.get('type')=='directory-inventory' for x in manifest['inputs'])
     _,mapping,_,preds,_=relink(out, Config(use_geometry=False,appearance_weight=1.,

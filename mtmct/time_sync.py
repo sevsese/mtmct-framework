@@ -14,8 +14,10 @@ class TransitionResult:
 
 
 class CameraTransitionModel:
-    def __init__(self, routes: dict[tuple[int, int], dict] | None = None):
+    def __init__(self, routes: dict[tuple[int, int], dict] | None = None,
+                 overlap_pairs: set[frozenset[int]] | None = None):
         self.routes = routes or {}
+        self.overlap_pairs = overlap_pairs or set()
 
     @classmethod
     def from_json(cls, path: str | Path):
@@ -23,7 +25,14 @@ class CameraTransitionModel:
         routes = {}
         for row in data.get("routes", []):
             routes[(int(row["from"]), int(row["to"]))] = row
-        return cls(routes)
+        overlap_pairs = {
+            frozenset((int(pair[0]), int(pair[1])))
+            for pair in data.get("overlap_pairs", [])
+        }
+        return cls(routes, overlap_pairs)
+
+    def allows_overlap(self, camera_a: int, camera_b: int) -> bool:
+        return frozenset((int(camera_a), int(camera_b))) in self.overlap_pairs
 
     def evaluate(self, source: int, destination: int, gap_s: float) -> TransitionResult:
         route = self.routes.get((int(source), int(destination)))
@@ -50,9 +59,14 @@ def parse_offsets(values: list[str] | None) -> dict[int, float]:
     return offsets
 
 
-def track_times(tracklet: dict, fps: float, offsets: dict[int, float] | None = None):
+def track_times(tracklet: dict, fps: float | dict[int, float],
+                offsets: dict[int, float] | None = None):
+    camera = int(tracklet["camera_id"])
+    offset = (offsets or {}).get(camera, 0.0)
     if "start_s" in tracklet and "end_s" in tracklet:
-        return float(tracklet["start_s"]), float(tracklet["end_s"])
-    offset = (offsets or {}).get(int(tracklet["camera_id"]), 0.0)
-    return (float(tracklet["start_frame"]) / fps + offset,
-            float(tracklet["end_frame"]) / fps + offset)
+        return float(tracklet["start_s"]) + offset, float(tracklet["end_s"]) + offset
+    camera_fps = float(fps.get(camera, 0.0) if isinstance(fps, dict) else fps)
+    if camera_fps <= 0:
+        raise ValueError(f"fps must be positive for camera {camera}")
+    return (float(tracklet["start_frame"]) / camera_fps + offset,
+            float(tracklet["end_frame"]) / camera_fps + offset)

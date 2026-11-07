@@ -23,7 +23,8 @@ def render(scene_dir: Path, predictions: Path, output: Path,
            max_frames: int = 300, stride: int = 3, scale: float = 0.5,
            cameras: list[int] | None = None,
            camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0,
-           frame_ids: set[int] | None = None, duration_seconds: float | None = None):
+           frame_ids: set[int] | None = None, duration_seconds: float | None = None,
+           camera_offsets_s: dict[int,float] | None = None):
     if stride < 1 or scale <= 0:
         raise ValueError('stride >= 1 and scale > 0 required')
     if camera_sources is None:
@@ -71,11 +72,12 @@ def render(scene_dir: Path, predictions: Path, output: Path,
                 images = []
                 any_frame = False
                 for cam, reader in readers.items():
-                    source_id = (round(frame_id * reader.fps / source_fps)
+                    local_time = frame_id/source_fps - (camera_offsets_s or {}).get(cam,0.)
+                    source_id = (round(local_time * reader.fps)
                                  if duration_seconds is not None else frame_id)
                     if duration_seconds is not None:
                         source_id = round(source_id / stride) * stride
-                    frame = reader.get(source_id)
+                    frame = reader.get(source_id) if source_id>=0 and local_time>=0 else None
                     if frame is not None:
                         any_frame = True
                         for r in tracks.get((cam, source_id), []):

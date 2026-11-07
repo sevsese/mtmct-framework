@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest-*/
 .venv/
 venv/
 
@@ -20,3 +21,10 @@ weights/
 .vscode/
 .DS_Store
 Thumbs.db
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+.pnpm-store/
+mtmct.zip
+baseline_wildtrack_v2_metrics.json

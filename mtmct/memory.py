@@ -5,11 +5,12 @@ from collections import defaultdict
 
 import numpy as np
 
-from .association import unit
+from .association import Config, _space_constraints, unit
 
 
 def apply_memory(tracklets: list[dict], mapping: dict[tuple[int, int], int],
-                 similarity_threshold: float = 0.9, max_prototypes: int = 3):
+                 similarity_threshold: float = 0.9, max_prototypes: int = 3,
+                 config: Config | None = None):
     key_to_index = {(int(row["camera_id"]), int(row["local_id"])): index
                     for index, row in enumerate(tracklets)}
     groups = defaultdict(list)
@@ -37,6 +38,8 @@ def apply_memory(tracklets: list[dict], mapping: dict[tuple[int, int], int],
         for left in left_indices:
             for right in right_indices:
                 a, b = tracklets[left], tracklets[right]
+                if config is not None and not _space_constraints(a, b, config)[0]:
+                    return False
                 if (int(a["camera_id"]) == int(b["camera_id"])
                         and max(int(a["start_frame"]), int(b["start_frame"]))
                         <= min(int(a["end_frame"]), int(b["end_frame"]))):
@@ -58,7 +61,7 @@ def apply_memory(tracklets: list[dict], mapping: dict[tuple[int, int], int],
         if left_root == right_root:
             continue
         if not compatible(members[left_root], members[right_root]):
-            decisions.append({"decision": "rejected", "reason": "temporal_conflict",
+            decisions.append({"decision": "rejected", "reason": "physical_conflict",
                               "similarity": round(similarity, 6)})
             continue
         parent[right_root] = left_root

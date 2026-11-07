@@ -25,11 +25,18 @@ class Config:
     spatial_slack_m: float = 1.5
     overlap_distance_m: float = 2.0
     fps: float = 30.0
+    camera_fps: dict[int, float] | None = None
     require_geometry: bool = False
     use_geometry: bool = True
     use_time: bool = True
     camera_offsets_s: dict[int, float] | None = None
     transition_model: object | None = None
+    gallery_weight: float = 0.0
+    gallery_size: int = 6
+    part_weight: float = 0.0
+    max_interior_gap_seconds: float = 30.0
+    max_interior_motion_heights: float = 4.0
+    duplicate_overlap_iou: float = 0.5
 
 
 def unit(v: list[float] | np.ndarray) -> np.ndarray:
@@ -38,24 +45,127 @@ def unit(v: list[float] | np.ndarray) -> np.ndarray:
     return a / norm if norm > 1e-10 else a
 
 
+def appearance_similarity(a: dict, b: dict, cfg: Config) -> float | None:
+    """Blend track means with the best pair of quality-selected observations."""
+    v, w = unit(a.get("embedding", [])), unit(b.get("embedding", []))
+    if v.size == 0 or w.size == 0 or v.shape != w.shape:
+        return None
+    mean_similarity = float(np.clip(v @ w, -1.0, 1.0))
+    weight = float(cfg.gallery_weight)
+    if not 0 <= weight <= 1:
+        raise ValueError("gallery_weight must be between 0 and 1")
+    limit = max(1, int(cfg.gallery_size))
+    left = [unit(row) for row in (a.get("feature_vectors") or [])[:limit]]
+    right = [unit(row) for row in (b.get("feature_vectors") or [])[:limit]]
+    scores = [float(x @ y) for x in left for y in right
+              if x.size and x.shape == y.shape]
+    reid_similarity = (mean_similarity if weight <= 0 or not scores else
+                       (1.0 - weight) * mean_similarity + weight * max(scores))
+    part_weight = float(cfg.part_weight)
+    if not 0 <= part_weight <= 1:
+        raise ValueError("part_weight must be between 0 and 1")
+    part_scores = []
+    for left_parts in a.get("body_parts", []):
+        for right_parts in b.get("body_parts", []):
+            shared = []
+            for name in ("upper", "lower"):
+                x, y = unit(left_parts.get(name, [])), unit(right_parts.get(name, []))
+                if x.size and x.shape == y.shape:
+                    shared.append(float(x @ y))
+            if shared:
+                part_scores.append(sum(shared) / len(shared))
+    if not part_scores or part_weight <= 0:
+        return float(np.clip(reid_similarity, -1.0, 1.0))
+    return float(np.clip((1.0 - part_weight) * reid_similarity +
+                         part_weight * max(part_scores), -1.0, 1.0))
+
+
 def frames(t: dict) -> dict[int, tuple[float,float]]:
     return {int(p[0]): (float(p[1]), float(p[2])) for p in t.get("positions", [])}
+
+
+def _interior_reconnect(earlier: dict, later: dict, gap: float, cfg: Config) -> bool:
+    if int(earlier["camera_id"]) != int(later["camera_id"]):
+        return False
+    if gap > cfg.max_interior_gap_seconds:
+        return False
+    a, b = earlier.get("end_bbox_norm"), later.get("start_bbox_norm")
+    if not a or not b:
+        return False
+    def interior(box):
+        cx, bottom = (box[0] + box[2]) / 2, box[3]
+        return .04 < cx < .96 and bottom < .97
+    if not interior(a) or not interior(b):
+        return False
+    height = max(((a[3] - a[1]) + (b[3] - b[1])) / 2, 1e-6)
+    center_a = np.array(((a[0] + a[2]) / 2, (a[1] + a[3]) / 2))
+    center_b = np.array(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
+    return float(np.linalg.norm(center_a - center_b) / height) <= cfg.max_interior_motion_heights
+
+
+def _same_camera_conflict(a: dict, b: dict, cfg: Config) -> bool:
+    shared = set(a.get("observation_frames", [])) & set(b.get("observation_frames", []))
+    if not a.get("observation_frames") or not b.get("observation_frames"):
+        return True
+    boxes_a, boxes_b = a.get("observation_boxes", {}), b.get("observation_boxes", {})
+    for frame in shared:
+        left, right = boxes_a.get(str(frame)), boxes_b.get(str(frame))
+        if not left or not right:
+            return True
+        x1, y1 = max(left[0], right[0]), max(left[1], right[1])
+        x2, y2 = min(left[2], right[2]), min(left[3], right[3])
+        intersection = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        area_a = max(0.0, left[2] - left[0]) * max(0.0, left[3] - left[1])
+        area_b = max(0.0, right[2] - right[0]) * max(0.0, right[3] - right[1])
+        iou = intersection / max(area_a + area_b - intersection, 1e-9)
+        if iou < cfg.duplicate_overlap_iou:
+            return True
+    return False
+
+
+def _component_conflict(a: dict, b: dict, cfg: Config) -> bool:
+    """A chain may span > max_gap; only simultaneous contradictions are global."""
+    fps = cfg.camera_fps or cfg.fps
+    start_a, end_a = track_times(a, fps, cfg.camera_offsets_s)
+    start_b, end_b = track_times(b, fps, cfg.camera_offsets_s)
+    if max(start_a, start_b) > min(end_a, end_b):
+        return False
+    if cfg.use_geometry:
+        positions_a, positions_b = frames(a), frames(b)
+        common = set(positions_a) & set(positions_b)
+        if common:
+            distance = float(np.median([
+                np.linalg.norm(np.subtract(positions_a[frame], positions_b[frame]))
+                for frame in common
+            ]))
+            if distance > cfg.overlap_distance_m:
+                return True
+    if int(a["camera_id"]) == int(b["camera_id"]):
+        return _same_camera_conflict(a, b, cfg)
+    return bool(cfg.transition_model and not cfg.transition_model.allows_overlap(
+        int(a["camera_id"]), int(b["camera_id"])))
 
 
 def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, float]:
     """(allowed, normalized spatial penalty, temporal penalty)."""
     start_a_frame, end_a_frame = int(a["start_frame"]), int(a["end_frame"])
     start_b_frame, end_b_frame = int(b["start_frame"]), int(b["end_frame"])
-    start_a, end_a = track_times(a, cfg.fps, cfg.camera_offsets_s)
-    start_b, end_b = track_times(b, cfg.fps, cfg.camera_offsets_s)
+    fps = cfg.camera_fps or cfg.fps
+    start_a, end_a = track_times(a, fps, cfg.camera_offsets_s)
+    start_b, end_b = track_times(b, fps, cfg.camera_offsets_s)
     overlapping = max(start_a, start_b) <= min(end_a, end_b)
     if overlapping and int(a["camera_id"]) == int(b["camera_id"]):
-        return False, 1., 1.
+        if _same_camera_conflict(a, b, cfg):
+            return False, 1., 1.
+        return True, 0.0, 0.0
     if not cfg.use_geometry and not cfg.use_time:
         return True, 0.0, 0.0
     pa, pb = frames(a), frames(b)
     if not cfg.use_geometry:
         if overlapping:
+            if cfg.transition_model and not cfg.transition_model.allows_overlap(
+                    int(a["camera_id"]), int(b["camera_id"])):
+                return False, 0.0, 1.0
             return True, 0.0, 0.0
         gap = max(start_a, start_b) - min(end_a, end_b)
         earlier, later = (a,b) if end_a < start_b else (b,a)
@@ -64,11 +174,12 @@ def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, floa
                 int(earlier["camera_id"]), int(later["camera_id"]), gap)
             if not transition.allowed:
                 return False, 0.0, 1.0
+        if gap > cfg.max_gap_seconds and not _interior_reconnect(earlier, later, gap, cfg):
+            return False, 0.0, 1.0
+        if cfg.transition_model:
             if transition.status == "unknown":
                 return True, 0.0, min(gap / max(cfg.max_gap_seconds, 1e-10), 1.0)
             return True, 0.0, transition.penalty
-        if gap > cfg.max_gap_seconds:
-            return False, 0.0, 1.0
         return True, 0.0, min(gap / cfg.max_gap_seconds, 1.0)
     if overlapping:
         common = sorted(set(pa).intersection(pb))
@@ -95,7 +206,7 @@ def _space_constraints(a: dict, b: dict, cfg: Config) -> tuple[bool, float, floa
         if not transition.allowed:
             return False, 1., 1.
         transition_penalty = transition.penalty if transition.status != "unknown" else None
-    elif gap > cfg.max_gap_seconds:
+    if gap > cfg.max_gap_seconds and not _interior_reconnect(earlier, later, gap, cfg):
         return False, 1., 1.
     p, q = frames(earlier), frames(later)
     if p and q:
@@ -126,11 +237,10 @@ def pair_score(a: dict, b: dict, cfg: Config) -> dict:
     if not feasible:
         return {"cost": None, "similarity": None, "spatial": spatial,
                 "temporal": temporal, "reason": "hard_constraint"}
-    v, w = unit(a.get("embedding", [])), unit(b.get("embedding", []))
-    if v.size == 0 or w.size == 0 or v.shape != w.shape:
+    similarity = appearance_similarity(a, b, cfg)
+    if similarity is None:
         return {"cost": None, "similarity": None, "spatial": spatial,
                 "temporal": temporal, "reason": "missing_reid"}
-    similarity = float(np.clip(v @ w, -1.0, 1.0))
     if similarity < cfg.min_similarity:
         return {"cost": None, "similarity": similarity, "spatial": spatial,
                 "temporal": temporal, "reason": "weak_appearance"}
@@ -191,7 +301,7 @@ def associate_graph(tracklets: list[dict], cfg: Config,
                 same_camera = tracklets[left]["camera_id"] == tracklets[right]["camera_id"]
                 if same_camera and not allow_same_camera_fragments:
                     compatible = False
-                elif not _space_constraints(tracklets[left], tracklets[right], cfg)[0]:
+                elif _component_conflict(tracklets[left], tracklets[right], cfg):
                     compatible = False
                 if not compatible:
                     break
@@ -247,8 +357,8 @@ def associate(tracklets: list[dict], cfg: Config) -> tuple[dict[tuple[int,int], 
             continue
         # Complete-link feasibility avoids inconsistent chains A~B, B~C,
         # while A and C are physically impossible.
-        compatible = all(
-            _space_constraints(tracklets[i], tracklets[j], cfg)[0]
+        compatible = not any(
+            _component_conflict(tracklets[i], tracklets[j], cfg)
             for i in members[r1] for j in members[r2]
         )
         if not compatible:

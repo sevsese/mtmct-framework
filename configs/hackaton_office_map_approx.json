@@ -1,0 +1,38 @@
+{
+  "status": "approximate",
+  "description": "Doorways and visible floor boundaries matched by eye. Normalized coordinates; refine anchors for metric use.",
+  "camera_fps": {"0": 25.0, "1": 25.0, "2": 25.0, "3": 20.0, "4": 25.0},
+  "camera_offsets_s": {"0": 0.0, "1": 1.0, "2": 1.0, "3": 4.0, "4": 3.0},
+  "cameras": {
+    "0": {
+      "image_size": [2592, 1944],
+      "anchors": ["far-left floor/door", "far-right floor/door", "near-left floor", "near-right floor"],
+      "image_points_norm": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+      "map_points_norm": [[0.335, 0.278], [0.481, 0.278], [0.375, 0.205], [0.430, 0.205]]
+    },
+    "1": {
+      "image_size": [2592, 1944],
+      "anchors": ["left doorway", "right doorway", "near-left floor", "near-right floor"],
+      "image_points_norm": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+      "map_points_norm": [[0.254, 0.326], [0.337, 0.303], [0.252, 0.246], [0.285, 0.246]]
+    },
+    "2": {
+      "image_size": [2592, 1944],
+      "anchors": ["corridor-left", "corridor-right", "near-left floor", "near-right floor"],
+      "image_points_norm": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+      "map_points_norm": [[0.444, 0.292], [0.528, 0.292], [0.489, 0.202], [0.520, 0.202]]
+    },
+    "3": {
+      "image_size": [2592, 1944],
+      "anchors": ["upper doorway", "lower doorway", "near-left floor", "near-right floor"],
+      "image_points_norm": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+      "map_points_norm": [[0.445, 0.573], [0.540, 0.556], [0.520, 0.505], [0.550, 0.528]]
+    },
+    "4": {
+      "image_size": [2592, 1944],
+      "anchors": ["corridor-left doorway", "corridor-right doorway", "near-left floor", "near-right floor"],
+      "image_points_norm": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+      "map_points_norm": [[0.454, 0.925], [0.495, 0.925], [0.505, 0.774], [0.548, 0.774]]
+    }
+  }
+}
