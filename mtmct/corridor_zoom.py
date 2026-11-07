@@ -11,6 +11,31 @@ from ultralytics.utils import YAML
 from ultralytics.utils.checks import check_yaml
 
 
+def distinct_crop_boxes(full, crop):
+    """Keep crop-only detections; retain the full-view box for near-duplicates."""
+    if not len(full) or not len(crop):
+        return crop
+    whole = full[:, :4]
+    part = crop[:, :4]
+    intersection = np.maximum(
+        0, np.minimum(part[:, None, 2:], whole[None, :, 2:]) -
+        np.maximum(part[:, None, :2], whole[None, :, :2])
+    ).prod(axis=2)
+    smaller_area = np.minimum(
+        (part[:, 2:] - part[:, :2]).prod(axis=1)[:, None],
+        (whole[:, 2:] - whole[:, :2]).prod(axis=1)[None, :]
+    )
+    part_foot = np.column_stack(((part[:, 0] + part[:, 2]) / 2, part[:, 3]))
+    whole_foot = np.column_stack(((whole[:, 0] + whole[:, 2]) / 2, whole[:, 3]))
+    distance = np.linalg.norm(part_foot[:, None] - whole_foot[None], axis=2)
+    smaller_height = np.minimum((part[:, 3] - part[:, 1])[:, None],
+                                (whole[:, 3] - whole[:, 1])[None, :])
+    duplicate = (smaller_area > 0) & (intersection >= .85 * smaller_area) & (
+        distance <= .15 * smaller_height
+    )
+    return crop[~duplicate.any(axis=1)]
+
+
 class ZoomTracker:
     def __init__(self, model, roi, tracker, log, exclude=None):
         self.model = model
@@ -44,6 +69,7 @@ class ZoomTracker:
             crop = crop[(crop[:,0]>2) & (crop[:,2]<r-x-2) &
                         ((y==0) | (crop[:,1]>2)) & (crop[:,3]<b-y-2)]
             crop[:,:4] += [x,y,x,y]
+            crop = distinct_crop_boxes(full,crop)
             combined = np.concatenate((full,crop))
             if len(crop):
                 rects=combined[:,:4].copy()

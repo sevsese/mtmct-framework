@@ -12,6 +12,7 @@ test('real NVIDIA results, all routes, synchronized video and overlays',async({p
   await expect(page.getByText('Глобальные треки',{exact:true}).last()).toBeVisible();
   await page.screenshot({path:path.join(shots,'dashboard-1366.png'),fullPage:true});
   await page.getByRole('link',{name:'Камеры',exact:true}).click();
+  await page.getByRole('button',{name:'Отдельные камеры'}).click();
   await expect(page.locator('video')).toHaveCount(2);
   await expect.poll(()=>page.locator('video').evaluateAll(videos=>videos.every(v=>(v as HTMLVideoElement).readyState>=2))).toBeTruthy();
   await expect.poll(()=>page.locator('canvas').first().evaluate(c=>{
@@ -33,7 +34,8 @@ test('real NVIDIA results, all routes, synchronized video and overlays',async({p
   const first=page.locator('tbody a').first();const gid=(await first.innerText()).replace('Global ','');
   await page.getByRole('textbox',{name:'Поиск Global ID'}).fill(gid);await expect(page.locator('tbody tr').first()).toBeVisible();
   await page.locator('tbody a').first().click();await expect(page.getByRole('heading',{name:`Global ID ${gid}`})).toBeVisible();
-  await page.getByRole('link',{name:'Показать на видео'}).click();await expect(page.locator('video')).toHaveCount(2);
+  await page.getByRole('link',{name:'Показать на видео'}).click();
+  await page.getByRole('button',{name:'Отдельные камеры'}).click();await expect(page.locator('video')).toHaveCount(2);
   for(const [label,title] of [['Аналитика','Аналитика'],['Настройки','Настройки результата'],['План помещения','План помещения']]){await page.getByRole('link',{name:label,exact:true}).click();await expect(page.getByRole('heading',{name:title,exact:true})).toBeVisible();}
   await expect(page.getByText('План пока не загружен')).toBeVisible();
   await page.getByRole('link',{name:'Аналитика',exact:true}).click();await expect(page.getByText(/global-2d-idf1-v1/)).toBeVisible();

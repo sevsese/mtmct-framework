@@ -40,7 +40,13 @@ class FrameSource:
                 raise FileNotFoundError(f'No images in {self.path}')
         elif self.path.is_file():
             self.images = None
-            self.video = cv2.VideoCapture(str(self.path))
+            # Several HD camera decoders may be open for a mosaic. Bound each
+            # decoder's buffers independently of OpenCV's compute threads.
+            params = [cv2.CAP_PROP_N_THREADS, 1] if hasattr(cv2, 'CAP_PROP_N_THREADS') else []
+            self.video = cv2.VideoCapture(str(self.path), cv2.CAP_FFMPEG, params)
+            if not self.video.isOpened():
+                self.video.release()
+                self.video = cv2.VideoCapture(str(self.path))
             if not self.video.isOpened():
                 raise RuntimeError(f'Cannot open video: {self.path}')
             measured = self.video.get(cv2.CAP_PROP_FPS)
@@ -58,8 +64,7 @@ class FrameSource:
             self.video.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
             self._cursor = frame_id
         while self._cursor < frame_id:
-            ok, _ = self.video.read()
-            if not ok:
+            if not self.video.grab():
                 return None
             self._cursor += 1
         ok, frame = self.video.read()
@@ -90,12 +95,24 @@ class FrameSource:
                     raise RuntimeError(f'Unreadable image: {self.images[fid]}')
                 yield fid, frame
             return
+        frame_count = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
+        expected_end = min(frame_count, max_frames) if frame_count and max_frames > 0 else frame_count or max_frames
         fid = 0
         while max_frames <= 0 or fid < max_frames:
-            frame = self.get(fid)
-            if frame is None:
+            sampled = fid % stride == 0
+            if sampled:
+                frame = self.get(fid)
+                ok = frame is not None
+            else:
+                ok = self.video.grab()
+                self._cursor += int(ok)
+            if not ok:
+                # Container frame count is an estimate for MKV/VFR. Small
+                # discrepancies are normal; a large shortfall is a failed run.
+                if fid == 0 or fid + max(2, round(self.fps)) < expected_end:
+                    raise RuntimeError(f'Video stopped at frame {fid}, expected about {expected_end}: {self.path}')
                 break
-            if fid % stride == 0:
+            if sampled:
                 yield fid, frame
             fid += 1
 

@@ -54,6 +54,16 @@ def finite(value):
     return number
 
 
+def office_camera_ids(cameras):
+    """Map uploaded IDs to the office preset's zero-based camera numbers."""
+    mapping = {}
+    for camera in cameras:
+        name = Path(camera.get('path') or '').stem.lower()
+        if name in {f'camera_new_{n}' for n in range(1, 6)}:
+            mapping[camera['camera_id']] = int(name[-1]) - 1
+    return mapping if len(cameras) == 5 and set(mapping.values()) == set(range(5)) else {}
+
+
 def video_info(path: Path):
     cap = cv2.VideoCapture(str(path))
     try:

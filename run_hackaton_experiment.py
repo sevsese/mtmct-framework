@@ -1,4 +1,5 @@
 """VS Code: измени настройки и нажми Run Python File."""
+import argparse
 import json
 import shutil
 from pathlib import Path
@@ -61,7 +62,7 @@ REVIEW_REFERENCE = ROOT / "runs" / "hackaton_5cam_60s_v10"
 # ============================================================================
 
 
-def main():
+def main(duration_seconds=DURATION_SECONDS):
     sources = {camera: VIDEO_DIR / name for camera, name in CAMERAS.items()}
     missing = [str(path) for path in sources.values() if not path.is_file()]
     if missing:
@@ -78,13 +79,13 @@ def main():
             shutil.copy2(source / name, out / name)
     else:
         write_config(out, {"dataset": "hackaton", "cameras": list(sources),
-                           "duration_seconds": DURATION_SECONDS, "frame_stride": FRAME_STRIDE,
+                           "duration_seconds": duration_seconds, "frame_stride": FRAME_STRIDE,
                            "tracker": str(TRACKER), "conf": CONF,
                            "camera_offset": [f"{camera}={seconds}" for camera, seconds in CAMERA_OFFSETS_SECONDS.items()],
                            "geometry": False, "metrics": False})
         track(VIDEO_DIR, out, MODEL, "osnet", None, DEVICE, 0, FRAME_STRIDE, 5,
               IMGSZ, CONF, reid_model=REID_MODEL, cameras=list(sources),
-              tracker=TRACKER, camera_sources=sources, max_seconds=DURATION_SECONDS,
+              tracker=TRACKER, camera_sources=sources, max_seconds=duration_seconds,
               zoom_rois=ZOOM_ROIS, exclude_rois=EXCLUDE_ROIS)
     tracklets_path = out / "local_tracklets.json"
     tracklets = json.loads(tracklets_path.read_text(encoding="utf-8"))
@@ -93,6 +94,7 @@ def main():
     cfg = Config(appearance_weight=.92, spatial_weight=0., temporal_weight=.08,
                  min_similarity=MIN_SIMILARITY, max_cost=.40,
                  max_gap_seconds=GLOBAL_MAX_GAP_SECONDS,
+                 max_interior_gap_seconds=GLOBAL_MAX_GAP_SECONDS,
                  camera_fps=CAMERA_FPS, camera_offsets_s=CAMERA_OFFSETS_SECONDS,
                  transition_model=CameraTransitionModel.from_json(TOPOLOGY),
                  gallery_weight=GALLERY_WEIGHT, part_weight=PART_WEIGHT,
@@ -100,13 +102,13 @@ def main():
     tracklets, mapping, _, predictions, _ = link(
         out, cfg, matcher="graph", allow_same_camera_fragments=True, memory=False,
         min_observations=MIN_OBSERVATIONS)
-    finish(out,sources,tracklets,mapping,predictions)
+    finish(out,sources,tracklets,mapping,predictions,duration_seconds)
 
 
-def finish(out,sources,tracklets,mapping,predictions):
+def finish(out,sources,tracklets,mapping,predictions,duration_seconds=DURATION_SECONDS):
     base=REVIEW_REFERENCE/"wall_map_points"/"wall_anchors.json"
     reviewed_map=None
-    if base.is_file() and (REVIEW_REFERENCE/"global_tracks_2d.csv").is_file():
+    if duration_seconds == DURATION_SECONDS and base.is_file() and (REVIEW_REFERENCE/"global_tracks_2d.csv").is_file():
         reference=tracks(REVIEW_REFERENCE/"global_tracks_2d.csv")
         reviewed_map,projection=fit_projection(reference,json.loads(base.read_text()),
                                                CAMERA_FPS,CAMERA_OFFSETS_SECONDS)
@@ -114,11 +116,13 @@ def finish(out,sources,tracklets,mapping,predictions):
             raise ValueError("Choose a new run for reviewed outputs")
         save_mapping(mapping,out/"automatic_ids.json")
         try:
-            passage=apply_pass(reference,tracks(predictions),mapping)
+            reviewed_mapping = mapping.copy()
+            passage=apply_pass(reference,tracks(predictions),reviewed_mapping)
             apply_frame_review(ROOT/"configs"/"office_pass_review.json",
-                               tracks(out/"observations.csv"),mapping,passage)
+                               tracks(out/"observations.csv"),reviewed_mapping,passage)
             all_segments=json.loads((out/"local_tracklets.json").read_text(encoding="utf-8"))
-            tracklets=[s for s in all_segments if (s["camera_id"],s["local_id"]) in mapping]
+            tracklets=[s for s in all_segments if (s["camera_id"],s["local_id"]) in reviewed_mapping]
+            mapping = reviewed_mapping
         except ValueError as exc:
             passage={"status":"not_matched","reason":str(exc)}
         (out/"projection_comparison.json").write_text(json.dumps(projection,indent=2))
@@ -145,9 +149,10 @@ def finish(out,sources,tracklets,mapping,predictions):
             predictions, FLOOR_CALIBRATION, out / "floor_tracks.csv", GLOBAL_MAX_GAP_SECONDS)
         render_floor_tracks(FLOOR_PLAN, floor_rows, out / "floor_tracks.png")
         print("Floor map: approximate door/floor-anchor calibration; refine the JSON for metric use.")
-    render(VIDEO_DIR, predictions, out / "mosaic.mp4", stride=FRAME_STRIDE,
-           scale=RENDER_SCALE, cameras=list(sources), camera_sources=sources,
-           duration_seconds=DURATION_SECONDS,camera_offsets_s=CAMERA_OFFSETS_SECONDS)
+    if duration_seconds is not None:
+        render(VIDEO_DIR, predictions, out / "mosaic.mp4", stride=FRAME_STRIDE,
+               scale=RENDER_SCALE, cameras=list(sources), camera_sources=sources,
+               duration_seconds=duration_seconds,camera_offsets_s=CAMERA_OFFSETS_SECONDS)
     print(f"DONE: {out}")
     print(f"Global tracks: {len(report)} (manual expectation: 5); no GT metrics were calculated.")
     for row in report:
@@ -156,4 +161,9 @@ def finish(out,sources,tracklets,mapping,predictions):
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--full", action="store_true", help="Process every frame interval to the end of each video")
+    args = parser.parse_args()
+    if args.full and LINK_ONLY:
+        parser.error("--full requires LINK_ONLY=False")
+    main(None if args.full else DURATION_SECONDS)

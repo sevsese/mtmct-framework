@@ -28,5 +28,6 @@ test('manual floor mapping and selecting a person',async({page,request})=>{
   await expect(page.getByRole('textbox',{name:'Global ID на плане'})).not.toHaveValue('');
   await expect(page.locator('polyline').first()).toBeVisible();
   await page.getByRole('link',{name:'Открыть этот момент на видео'}).click();
+  await page.getByRole('button',{name:'Отдельные камеры'}).click();
   await expect(page.locator('video')).toHaveCount(2);
 });

@@ -1,5 +1,6 @@
 from mtmct.association import Config, appearance_similarity
 from mtmct.track_report import build_global_track_report
+import numpy as np
 
 
 def row(camera, local_id, embedding, start=0, end=10, features=None):
@@ -31,3 +32,11 @@ def test_global_report_orders_and_deduplicates_camera_sequence():
     assert report[0]["camera_sequence"] == [0, 1]
     assert report[0]["start_s"] == 0
     assert report[0]["end_s"] == 5
+
+
+def test_zoom_keeps_a_distinct_person_but_discards_contained_duplicate():
+    from mtmct.corridor_zoom import distinct_crop_boxes
+
+    full = np.array([[10, 10, 50, 100, .8, 0]])
+    crop = np.array([[20, 50, 40, 99, .9, 0], [35, 30, 60, 105, .9, 0]])
+    np.testing.assert_array_equal(distinct_crop_boxes(full, crop), crop[1:])

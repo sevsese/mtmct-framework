@@ -8,6 +8,7 @@ from pathlib import Path
 
 import ijson
 
+from backend.adapter import office_camera_ids
 from mtmct.cache import write_config
 from run_hackaton_experiment import (
     CONF, EXCLUDE_ROIS, FRAME_STRIDE, GALLERY_WEIGHT, GLOBAL_MAX_GAP_SECONDS,
@@ -30,7 +31,7 @@ def frame_limit(options, camera):
     return limit
 
 
-def tracking_config(camera_id):
+def tracking_config(camera_id, office_id=None):
     return {
         "stride": FRAME_STRIDE,
         "sample_every": 5,
@@ -38,8 +39,8 @@ def tracking_config(camera_id):
         "conf": CONF,
         "tracker": str(TRACKER),
         "reid_model": REID_MODEL,
-        "zoom_rois": {camera_id: ZOOM_ROIS[camera_id]} if camera_id in ZOOM_ROIS else {},
-        "exclude_rois": {camera_id: EXCLUDE_ROIS[camera_id]} if camera_id in EXCLUDE_ROIS else {},
+        "zoom_rois": {camera_id: ZOOM_ROIS[office_id]} if office_id in ZOOM_ROIS else {},
+        "exclude_rois": {camera_id: EXCLUDE_ROIS[office_id]} if office_id in EXCLUDE_ROIS else {},
     }
 
 
@@ -51,7 +52,8 @@ def track_camera(spec, camera):
     cv2.setNumThreads(1)
     torch.set_num_threads(1)
     output = Path(spec["output"]) / f"camera_{camera['camera_id']}"
-    settings = tracking_config(camera["camera_id"])
+    office_id = office_camera_ids(spec["cameras"]).get(camera["camera_id"])
+    settings = tracking_config(camera["camera_id"], office_id)
     track(
         Path(spec["scene"]), output, str(ROOT / MODEL), "osnet", None,
         spec["options"]["device"], frame_limit(spec["options"], camera),
@@ -91,6 +93,7 @@ def main():
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     output = Path(spec["output"])
     cameras = spec["cameras"]
+    office_ids = office_camera_ids(cameras)
     options = spec["options"]
     if not (ROOT / MODEL).is_file():
         raise FileNotFoundError(f"Модель отсутствует: {ROOT / MODEL}")
@@ -108,7 +111,7 @@ def main():
     parts = []
     for camera in cameras:
         part = output / f"camera_{camera['camera_id']}"
-        expected = tracking_config(camera["camera_id"])
+        expected = tracking_config(camera["camera_id"], office_ids.get(camera["camera_id"]))
         reusable = False
         if options.get("resume") and all((part / name).is_file() for name in (
             "manifest.json", "performance.json", "observations.csv", "local_tracklets.json"
@@ -119,6 +122,7 @@ def main():
         if reusable:
             print(f"Reusing completed camera {camera['camera_id']}", flush=True)
         else:
+            print(f"STAGE tracking: camera {camera['camera_id']} ({len(parts) + 1}/{len(cameras)})", flush=True)
             subprocess.run(
                 [sys.executable, "-u", "-m", "backend.worker", str(spec_path), str(camera["camera_id"])],
                 check=True,
@@ -153,13 +157,21 @@ def main():
 
     fps = {c["camera_id"]: c["fps"] for c in cameras}
     offsets = {c["camera_id"]: c.get("offset", 0) for c in cameras}
-    topology = CameraTransitionModel.from_json(TOPOLOGY) if all(c in range(5) for c in fps) else None
+    topology = None
+    if office_ids:
+        preset = CameraTransitionModel.from_json(TOPOLOGY)
+        actual = {office: camera for camera, office in office_ids.items()}
+        topology = CameraTransitionModel(
+            {(actual[a], actual[b]): route for (a, b), route in preset.routes.items()},
+            {frozenset(actual[c] for c in pair) for pair in preset.overlap_pairs},
+        )
     link(
         output,
         Config(
             appearance_weight=.92, spatial_weight=0, temporal_weight=.08,
             min_similarity=MIN_SIMILARITY, max_cost=.40,
             max_gap_seconds=GLOBAL_MAX_GAP_SECONDS, camera_fps=fps,
+            max_interior_gap_seconds=GLOBAL_MAX_GAP_SECONDS,
             camera_offsets_s=offsets, transition_model=topology,
             gallery_weight=GALLERY_WEIGHT, part_weight=PART_WEIGHT,
             use_geometry=False, use_time=True,
