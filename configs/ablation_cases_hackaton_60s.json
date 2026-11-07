@@ -1,7 +1,0 @@
-[
-  {"name": "overlap pair, weak ReID: cam0 L1 / cam1 L1", "pair": [[0, 1], [1, 1]], "expect": "hypothesis"},
-  {"name": "overlap pair, strong: cam3 L1 + cam4 L31", "pair": [[3, 1], [4, 31]], "expect": "together"},
-  {"name": "different people, same camera: cam2 L3 / cam2 L4", "pair": [[2, 3], [2, 4]], "expect": "separate"},
-  {"name": "different groups: cam1 L1 / cam3 L1", "pair": [[1, 1], [3, 1]], "expect": "separate"},
-  {"name": "same-camera chain under unknown topology (split accepted): cam2 L16 / cam2 L17", "pair": [[2, 16], [2, 17]], "expect": "separate"}
-]

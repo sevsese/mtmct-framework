@@ -41,3 +41,23 @@ frontend/playwright.config.ts
 .tmp-*/
 exports/
 *.zip
+
+# Archived launchers and development notes remain local only
+launchers/
+run_demo.cmd
+run_wildtrack.py
+run_wildtrack_fixed.py
+run_wildtrack_fixed.bat
+README_MULTIDATASET_RU.md
+README_NIGHTLY_OPTIMIZER_RU.md
+README_WILDTRACK_FIXED_RU.md
+docs/PROGRESS.md
+docs/CURRENT_STATE.md
+docs/ROADMAP.md
+docs/ARCHITECTURE.md
+docs/OFFICE_INTEGRATION.md
+docs/OFFICE_PLAN_FIXES.md
+docs/V2_EXTENSION_STATUS.md
+docs/WEB_AUDIT.md
+docs/WEB_VALIDATION.md
+configs/ablation_cases_hackaton_60s.json

@@ -44,6 +44,7 @@ python run.py office --seconds 120 --run-name office_my_test_01
 
 ## Работа в VS Code
 
-Выберите интерпретатор окружения neuro_clean. Для отдельных экспериментов
-откройте нужный файл из `launchers/`, измените настройки и нажмите Run Python File.
-Для общего run.py используйте терминал с аргументами, как показано выше.
+Выберите интерпретатор окружения neuro_clean.
+Для запуска используйте терминал с командами `python run.py app` или
+`python run.py office --seconds 120 --run-name office_new`.
+Настройки офисного запуска находятся в `run_hackaton_experiment.py`.
