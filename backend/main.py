@@ -328,7 +328,7 @@ def analytics(identifier: str):
 
 
 class ProcessOptions(BaseModel):
-    max_frames: int = Field(default=900, ge=0, le=1000000)
+    max_frames: int = Field(default=0, ge=0, le=1000000)
     max_seconds: float | None = Field(default=None,gt=0,le=86400,allow_inf_nan=False)
     device: str = Field(default='cuda:0', pattern=r'^(cpu|cuda:[0-9]+)$')
 
