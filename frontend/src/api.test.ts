@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { cameraTime,color,time } from './api';
+import { cameraTime,color,shouldSeekVideo,time } from './api';
 describe('Video time and identity presentation',()=>{
   it('applies offset once and clamps recordings with different durations',()=>{
     expect(cameraTime(12,{offset:2,duration:20})).toEqual({local:10,active:true});
@@ -10,5 +10,10 @@ describe('Video time and identity presentation',()=>{
   it('uses the same global color on all cameras and a neutral local fallback',()=>{
     expect(color(7)).toBe(color(7));expect(color(7)).not.toBe(color(8));expect(color(null)).toBe('#aab4c5');
     expect(time(null)).toBe('Нет данных');expect(time(61.5)).toBe('01:01.5');
+  });
+  it('does not repeatedly reset the decoder for small playback drift',()=>{
+    expect(shouldSeekVideo(10,10.3,true)).toBe(false);
+    expect(shouldSeekVideo(10,11,true)).toBe(true);
+    expect(shouldSeekVideo(10,10.1,false)).toBe(true);
   });
 });
