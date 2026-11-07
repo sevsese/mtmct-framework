@@ -1,0 +1,227 @@
+[
+  {
+    "camera_id": 0,
+    "local_id": 1,
+    "global_id": 1
+  },
+  {
+    "camera_id": 0,
+    "local_id": 31,
+    "global_id": 27
+  },
+  {
+    "camera_id": 0,
+    "local_id": 32,
+    "global_id": 28
+  },
+  {
+    "camera_id": 1,
+    "local_id": 1,
+    "global_id": 2
+  },
+  {
+    "camera_id": 1,
+    "local_id": 5,
+    "global_id": 10
+  },
+  {
+    "camera_id": 1,
+    "local_id": 7,
+    "global_id": 11
+  },
+  {
+    "camera_id": 1,
+    "local_id": 18,
+    "global_id": 17
+  },
+  {
+    "camera_id": 1,
+    "local_id": 28,
+    "global_id": 24
+  },
+  {
+    "camera_id": 1,
+    "local_id": 30,
+    "global_id": 25
+  },
+  {
+    "camera_id": 1,
+    "local_id": 31,
+    "global_id": 26
+  },
+  {
+    "camera_id": 2,
+    "local_id": 1,
+    "global_id": 7
+  },
+  {
+    "camera_id": 2,
+    "local_id": 3,
+    "global_id": 6
+  },
+  {
+    "camera_id": 2,
+    "local_id": 4,
+    "global_id": 8
+  },
+  {
+    "camera_id": 2,
+    "local_id": 6,
+    "global_id": 12
+  },
+  {
+    "camera_id": 2,
+    "local_id": 7,
+    "global_id": 6
+  },
+  {
+    "camera_id": 2,
+    "local_id": 9,
+    "global_id": 17
+  },
+  {
+    "camera_id": 2,
+    "local_id": 12,
+    "global_id": 20
+  },
+  {
+    "camera_id": 2,
+    "local_id": 13,
+    "global_id": 21
+  },
+  {
+    "camera_id": 2,
+    "local_id": 18,
+    "global_id": 16
+  },
+  {
+    "camera_id": 2,
+    "local_id": 19,
+    "global_id": 15
+  },
+  {
+    "camera_id": 3,
+    "local_id": 1,
+    "global_id": 4
+  },
+  {
+    "camera_id": 3,
+    "local_id": 3,
+    "global_id": 5
+  },
+  {
+    "camera_id": 3,
+    "local_id": 5,
+    "global_id": 9
+  },
+  {
+    "camera_id": 3,
+    "local_id": 6,
+    "global_id": 6
+  },
+  {
+    "camera_id": 3,
+    "local_id": 7,
+    "global_id": 8
+  },
+  {
+    "camera_id": 3,
+    "local_id": 13,
+    "global_id": 13
+  },
+  {
+    "camera_id": 3,
+    "local_id": 18,
+    "global_id": 22
+  },
+  {
+    "camera_id": 3,
+    "local_id": 25,
+    "global_id": 16
+  },
+  {
+    "camera_id": 3,
+    "local_id": 29,
+    "global_id": 23
+  },
+  {
+    "camera_id": 3,
+    "local_id": 46,
+    "global_id": 13
+  },
+  {
+    "camera_id": 3,
+    "local_id": 47,
+    "global_id": 16
+  },
+  {
+    "camera_id": 4,
+    "local_id": 1,
+    "global_id": 3
+  },
+  {
+    "camera_id": 4,
+    "local_id": 2,
+    "global_id": 3
+  },
+  {
+    "camera_id": 4,
+    "local_id": 6,
+    "global_id": 6
+  },
+  {
+    "camera_id": 4,
+    "local_id": 8,
+    "global_id": 4
+  },
+  {
+    "camera_id": 4,
+    "local_id": 18,
+    "global_id": 8
+  },
+  {
+    "camera_id": 4,
+    "local_id": 19,
+    "global_id": 9
+  },
+  {
+    "camera_id": 4,
+    "local_id": 20,
+    "global_id": 13
+  },
+  {
+    "camera_id": 4,
+    "local_id": 21,
+    "global_id": 14
+  },
+  {
+    "camera_id": 4,
+    "local_id": 22,
+    "global_id": 15
+  },
+  {
+    "camera_id": 4,
+    "local_id": 23,
+    "global_id": 13
+  },
+  {
+    "camera_id": 4,
+    "local_id": 24,
+    "global_id": 16
+  },
+  {
+    "camera_id": 4,
+    "local_id": 25,
+    "global_id": 13
+  },
+  {
+    "camera_id": 4,
+    "local_id": 27,
+    "global_id": 18
+  },
+  {
+    "camera_id": 4,
+    "local_id": 29,
+    "global_id": 19
+  }
+]

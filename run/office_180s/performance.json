@@ -1,0 +1,47 @@
+[
+  {
+    "camera_id": 0,
+    "processed_frames": 2250,
+    "seconds": 190.94,
+    "source_fps": 25.0,
+    "inference_fps": 11.78,
+    "fps": 11.78,
+    "peak_cuda_tensor_gib": 0.52
+  },
+  {
+    "camera_id": 1,
+    "processed_frames": 2250,
+    "seconds": 188.69,
+    "source_fps": 25.0,
+    "inference_fps": 11.92,
+    "fps": 11.92,
+    "peak_cuda_tensor_gib": 0.62
+  },
+  {
+    "camera_id": 2,
+    "processed_frames": 2250,
+    "seconds": 207.31,
+    "source_fps": 25.0,
+    "inference_fps": 10.85,
+    "fps": 10.85,
+    "peak_cuda_tensor_gib": 0.66
+  },
+  {
+    "camera_id": 3,
+    "processed_frames": 1800,
+    "seconds": 182.25,
+    "source_fps": 20.0,
+    "inference_fps": 9.88,
+    "fps": 9.88,
+    "peak_cuda_tensor_gib": 0.75
+  },
+  {
+    "camera_id": 4,
+    "processed_frames": 2250,
+    "seconds": 210.23,
+    "source_fps": 25.0,
+    "inference_fps": 10.7,
+    "fps": 10.7,
+    "peak_cuda_tensor_gib": 0.8
+  }
+]

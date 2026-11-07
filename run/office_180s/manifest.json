@@ -1,0 +1,102 @@
+{
+  "schema_version": "mtmct-cache-v1",
+  "git_sha": null,
+  "scene": "Hackaton Data",
+  "cameras": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "inputs": [
+    {
+      "path": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_1.mkv",
+      "size": 43605047,
+      "sha256": "744331b88aadaf56a83540d3081f22f11cf207ee93b62bacf03972c679814dc5"
+    },
+    {
+      "path": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_2.mkv",
+      "size": 38238825,
+      "sha256": "6839e486dd14c70b948f5f8e120d3cb339c45a1a26dd1baa496200704fef59c4"
+    },
+    {
+      "path": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_3.mkv",
+      "size": 59803891,
+      "sha256": "f90f08498e306b3e75b07489a253ebdfcbb5f3373b73478b086bd5d7ef9a8873"
+    },
+    {
+      "path": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_4.mkv",
+      "size": 52768387,
+      "sha256": "8ede342c3d0d98ab912e98c1a31ef5458ca04a8329b882634b277d7c4634bef2"
+    },
+    {
+      "path": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_5.mkv",
+      "size": 36655892,
+      "sha256": "6e3dd8bb2bb0c7b640b79b7a2c85f54d8346e930e9d89f55d86cf20f43aa4be5"
+    }
+  ],
+  "models": {
+    "detector": {
+      "name": "yolo26l.pt",
+      "path": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\yolo26l.pt",
+      "size": 53211173,
+      "sha256": "9fe3c544f2b19bebad7ea41e76d7ad3d88b7c2f10d11d24430c5311f6b32db26"
+    },
+    "reid": {
+      "name": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\weights\\osnet_ibn_x1_0_msmt17_combineall_256x128_amsgrad_ep150_stp60_lr0.0015_b64_fb10_softmax_labelsmooth_flip_jitter.pth",
+      "path": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\weights\\osnet_ibn_x1_0_msmt17_combineall_256x128_amsgrad_ep150_stp60_lr0.0015_b64_fb10_softmax_labelsmooth_flip_jitter.pth",
+      "size": 17277524,
+      "sha256": "2aca54945043301c82fe1a08bb22b045adb0c210673cb8319f0d4f44778f0566"
+    }
+  },
+  "feature_dimension": 512,
+  "tracking_config": {
+    "max_frames": 0,
+    "stride": 2,
+    "sample_every": 5,
+    "imgsz": 1536,
+    "conf": 0.1,
+    "tracker": "bytetrack.yaml",
+    "reid_method": "osnet",
+    "reid_model": "osnet_ibn_x1_0",
+    "camera_sources": {
+      "0": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_1.mkv",
+      "1": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_2.mkv",
+      "2": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_3.mkv",
+      "3": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_4.mkv",
+      "4": "D:\\rabochaya papka\\\u043d\u0435\u0439\u0440\u043e\\MTMCT_GPU_3070Ti\\data\\Hackaton Data\\camera_new_5.mkv"
+    },
+    "source_fps": {
+      "0": 25.0,
+      "1": 25.0,
+      "2": 25.0,
+      "3": 20.0,
+      "4": 25.0
+    },
+    "fps_fallback": 30.0,
+    "frame_ids": null,
+    "max_seconds": 180.0,
+    "zoom_rois": {},
+    "exclude_rois": {
+      "2": [
+        [
+          0.659,
+          0.204,
+          0.935,
+          0.372
+        ]
+      ]
+    },
+    "min_person_sizes": {
+      "2": [
+        0.024,
+        0.1
+      ],
+      "4": [
+        0.02,
+        0.09
+      ]
+    }
+  }
+}

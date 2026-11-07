@@ -1,0 +1,98 @@
+[
+  {
+    "person_id": 1,
+    "global_track_id": "1:1",
+    "start_time": 0.0,
+    "end_time": 1.52,
+    "cameras": [
+      0
+    ]
+  },
+  {
+    "person_id": 2,
+    "global_track_id": "2:1",
+    "start_time": 1.0,
+    "end_time": 6.44,
+    "cameras": [
+      1
+    ]
+  },
+  {
+    "person_id": 3,
+    "global_track_id": "3:1",
+    "start_time": 3.0,
+    "end_time": 12.52,
+    "cameras": [
+      4
+    ]
+  },
+  {
+    "person_id": 4,
+    "global_track_id": "4:1",
+    "start_time": 4.0,
+    "end_time": 33.0,
+    "cameras": [
+      3,
+      4
+    ]
+  },
+  {
+    "person_id": 5,
+    "global_track_id": "5:1",
+    "start_time": 14.0,
+    "end_time": 27.3,
+    "cameras": [
+      3
+    ]
+  },
+  {
+    "person_id": 6,
+    "global_track_id": "6:1",
+    "start_time": 22.76,
+    "end_time": 120.92,
+    "cameras": [
+      4,
+      3,
+      2
+    ]
+  },
+  {
+    "person_id": 7,
+    "global_track_id": "7:1",
+    "start_time": 53.64,
+    "end_time": 55.88,
+    "cameras": [
+      2
+    ]
+  },
+  {
+    "person_id": 8,
+    "global_track_id": "8:1",
+    "start_time": 73.56,
+    "end_time": 120.92,
+    "cameras": [
+      4,
+      3,
+      2
+    ]
+  },
+  {
+    "person_id": 9,
+    "global_track_id": "9:1",
+    "start_time": 77.1,
+    "end_time": 92.2,
+    "cameras": [
+      3,
+      4
+    ]
+  },
+  {
+    "person_id": 10,
+    "global_track_id": "10:1",
+    "start_time": 106.84,
+    "end_time": 110.92,
+    "cameras": [
+      1
+    ]
+  }
+]
