@@ -11,6 +11,7 @@ from math import isfinite
 import numpy as np
 
 from .scoring import Evidence, physical, same_view_continuity, score
+from .candidates_v2 import candidate_pairs
 
 
 @dataclass(frozen=True)
@@ -28,9 +29,13 @@ class Settings:
     cross_camera_gallery: float = .67
     cross_camera_quality: float = .30
     recover_same_view: bool = False
+    calibration_path: str | None = None
+    optimizer: str = 'agglomerative'
+    identity_bank_path: str | None = None
 
 
-OFFICE_SETTINGS = Settings(min_lifetime_s=1., cross_camera_mean=.72, recover_same_view=True)
+OFFICE_SETTINGS = Settings(min_lifetime_s=1., cross_camera_mean=.72, recover_same_view=True,
+                           identity_bank_path='runs/office_identity_bank.sqlite')
 
 
 def observed_lifetime(tracks):
@@ -108,10 +113,9 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
 
     edges, neighbors = [], defaultdict(list)
     candidates = {}
-    # ponytail: pair enumeration is quadratic in offline tracklets; add an
-    # indexed ReID shortlist when profiling shows this dominates long runs.
-    for i, left in enumerate(tracks):
-        for j in range(i + 1, len(tracks)):
+    for i, j in candidate_pairs(tracks, settings.top_k):
+        left = tracks[i]
+        for j in (j,):
             right = tracks[j]
             reason = veto(i, j)
             edge = {"i": i, "j": j, "left_uid": left.uid, "right_uid": right.uid,
@@ -247,6 +251,27 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
 
     groups = sorted((sorted(group) for group in members.values()),
                     key=lambda group: min((tracks[i].interval[0], tracks[i].uid) for i in group))
+    if settings.calibration_path:
+        from .probability import predict
+        calibration = json.loads(__import__('pathlib').Path(settings.calibration_path).read_text(encoding='utf-8'))
+        for edge in edges:
+            if edge.get('cost') is not None:
+                edge['probability'] = predict(edge['cost'], calibration)
+    if settings.optimizer == 'correlation':
+        from .correlation import solve
+        if not settings.calibration_path:
+            raise ValueError('Correlation optimizer requires a supervised calibration model')
+        probabilities={(e['i'],e['j']):e['probability'] for e in edges
+                       if e.get('probability') is not None and (e['i'],e['j']) in candidates}
+        conflicts=[(i,j) for i in range(len(tracks)) for j in range(i+1,len(tracks)) if veto(i,j)]
+        groups,_ = solve(len(tracks),probabilities,conflicts)
+        owners={i:k for k,g in enumerate(groups) for i in g}
+        for edge in edges:
+            if edge.get('probability') is not None and (edge['i'],edge['j']) in candidates:
+                accepted=owners[edge['i']]==owners[edge['j']]
+                edge.update(state='confirmed' if accepted else 'rejected',decision='accepted' if accepted else 'rejected',reason='correlation_optimizer')
+    elif settings.optimizer != 'agglomerative':
+        raise ValueError('Unknown graph optimizer')
     return tracks, groups, edges
 
 
@@ -307,6 +332,10 @@ def link_v2(run_dir, manifest, tracklets, cfg, *, scene_id=0, same_camera=True,
     scope = hashlib.sha256(json.dumps(provenance if provenance["inputs"] else str(run_dir.resolve()),
                                        sort_keys=True).encode()).hexdigest()
     mapping, state = register(registry, scope, tracks, groups, edges)
+    if settings.identity_bank_path:
+        from .identity_bank import update_bank
+        model_scope=hashlib.sha256(json.dumps(manifest.get('models'),sort_keys=True).encode()).hexdigest()
+        state['persistent_person_ids']=update_bank(settings.identity_bank_path,model_scope,scope,tracks,groups,edges,mapping)
     state["config"] = {"geometry": cfg.use_geometry, "settings": asdict(settings),
                        "weights": [cfg.appearance_weight, cfg.spatial_weight, cfg.temporal_weight],
                        "camera_fps": cfg.camera_fps, "camera_offsets_s": cfg.camera_offsets_s,
@@ -341,4 +370,6 @@ def link_v2(run_dir, manifest, tracklets, cfg, *, scene_id=0, same_camera=True,
                         suppressed_boxes.add(box)
     out_csv, out_txt = export_predictions(source, run_dir/"global_ids.json", run_dir, scene_id=scene_id,
                                          excluded_observations=suppressed_boxes)
+    from .episodes import export_episodes
+    export_episodes(out_csv, {t.key[0]: t.fps for t in tracks}, cfg.camera_offsets_s or {}, cfg.max_gap_seconds)
     return tracklets, mapping, edges, out_csv, out_txt
