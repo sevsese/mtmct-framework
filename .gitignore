@@ -10,7 +10,6 @@ venv/
 data/*
 !data/README.md
 runs/
-run/*/
 weights/*
 !weights/README.md
 *.pt
@@ -61,9 +60,3 @@ docs/V2_EXTENSION_STATUS.md
 docs/WEB_AUDIT.md
 docs/WEB_VALIDATION.md
 configs/ablation_cases_hackaton_60s.json
-
-# Two explicitly published result snapshots
-!run/office_120s/
-!run/office_120s/**
-!run/office_180s/
-!run/office_180s/**

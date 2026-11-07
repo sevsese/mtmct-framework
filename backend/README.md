@@ -3,7 +3,7 @@
 Запуск: `python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`
 из корня репозитория с активированным окружением. Интерактивная схема:
 http://127.0.0.1:8000/docs, OpenAPI JSON: `/openapi.json`.
-Полная установка и использование: [WEB_INTERFACE.md](../docs/WEB_INTERFACE.md).
+Установка и пользовательские сценарии описаны в [руководстве](../docs/START_HERE.md).
 
 ## Endpoints
 
@@ -53,6 +53,63 @@ Camera ID и имена файлов уникальны. `fps` можно пер
 если приложено видео, его измеренный FPS имеет приоритет. Offset означает добавку
 к локальному времени камеры. В режиме results видео необязательны, `cameras=[]`
 допустим. Режим raw принимает только перечисленные видео.
+
+## Запуск анализа из Python
+
+Сначала запустите сервер с установленными моделями. Сохраните пример в файл
+Python и укажите пути к своим видео. Для синхронизации замените нулевые
+смещения на значения в секундах для ваших записей.
+
+```python
+import json
+import time
+from contextlib import ExitStack
+from pathlib import Path
+
+import httpx
+
+paths = [Path("videos/entrance.mp4"), Path("videos/corridor.mp4")]
+cameras = [
+    {"camera_id": i, "filename": path.name, "name": path.stem, "offset": 0}
+    for i, path in enumerate(paths)
+]
+
+with httpx.Client(base_url="http://127.0.0.1:8000", timeout=120) as client:
+    with ExitStack() as stack:
+        files = [
+            ("files", (path.name, stack.enter_context(path.open("rb"))))
+            for path in paths
+        ]
+        response = client.post("/api/datasets/upload", files=files, data={
+            "name": "Анализ из Python", "mode": "raw", "cameras": json.dumps(cameras),
+        })
+        response.raise_for_status()
+        dataset_id = response.json()["id"]
+
+    response = client.post(f"/api/datasets/{dataset_id}/process", json={
+        "max_seconds": 10, "device": "cpu", "matcher": "v2",
+    })
+    response.raise_for_status()
+    print(f"Набор: {dataset_id}", flush=True)
+
+    while True:
+        response = client.get(f"/api/jobs/{dataset_id}")
+        response.raise_for_status()
+        job = response.json()
+        if job["status"] == "completed":
+            break
+        if job["status"] == "failed":
+            raise RuntimeError(job.get("log") or job.get("error"))
+        time.sleep(2)
+
+    response = client.get(f"/api/datasets/{dataset_id}/tracks")
+    response.raise_for_status()
+    print(f"Глобальных треков: {response.json()['total']}")
+```
+
+Для полного прогона уберите поле `max_seconds`. Сохранённый набор можно
+выбрать по имени в верхней панели приложения. Данные доступны локально
+в `data/web/<id>/result/` или в каталоге `MTMCT_WEB_STORE`.
 
 ## Собственный формат результатов
 
