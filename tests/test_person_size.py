@@ -20,3 +20,10 @@ def test_head_and_torso_do_not_spawn_tracks_beside_full_person():
     np.testing.assert_array_equal(distinct_crop_boxes(full,crop),crop[1:])
     boxes = np.concatenate((full,crop))
     np.testing.assert_array_equal(suppress_body_parts(boxes),boxes[[0,2]])
+
+
+def test_group_box_is_rejected_without_removing_individuals():
+    from mtmct.corridor_zoom import reject_group_boxes
+    previous=[[0,0,40,100],[50,0,90,100]]
+    boxes=np.array([[0,0,90,100,.9,0],[0,0,40,100,.8,0],[50,0,90,100,.8,0]])
+    np.testing.assert_array_equal(reject_group_boxes(boxes,previous),boxes[1:])

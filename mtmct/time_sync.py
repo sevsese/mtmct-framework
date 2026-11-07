@@ -51,9 +51,9 @@ class CameraTransitionModel:
             return TransitionResult(False, 1.0, "outside_measured_route")
         if maximum == float("inf") or maximum <= minimum:
             return TransitionResult(True, 0.0, "measured")
-        midpoint = (minimum + maximum) / 2
-        penalty = min(abs(gap_s - midpoint) / ((maximum - minimum) / 2), 1.0)
-        return TransitionResult(True, penalty, "measured")
+        # An allowed interval is not a learned travel-time distribution.
+        # Do not invent a preference for its midpoint.
+        return TransitionResult(True, 0.0, "measured")
 
 
 def parse_offsets(values: list[str] | None) -> dict[int, float]:

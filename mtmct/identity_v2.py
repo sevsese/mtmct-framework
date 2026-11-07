@@ -141,7 +141,9 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
                         or min(len(left.prototypes), len(right.prototypes)) < 2):
                     edge["reason"] = "insufficient_cross_camera_crop_quality"
                     continue
-                if (parts.get("mean", -1.) < settings.cross_camera_mean
+                overlap_support=(edge['topology']=='overlap' and parts.get('mean',-1.)>=.55
+                                 and parts.get('gallery_top3',-1.)>=settings.cross_camera_gallery)
+                if not overlap_support and (parts.get("mean", -1.) < settings.cross_camera_mean
                         or parts.get("gallery_top3", -1.) < settings.cross_camera_gallery):
                     edge["reason"] = "weak_cross_camera_reid"
                     continue

@@ -120,7 +120,13 @@ def appearance(a, b, cfg, gallery="topk"):
     if a.mean.size and a.mean.shape == b.mean.shape:
         values.append(("mean", float(a.mean @ b.mean), 1 - cfg.gallery_weight))
     if gallery != "mean" and a.prototypes and b.prototypes:
-        left, right = np.array([p["e"] for p in a.prototypes]), np.array([p["e"] for p in b.prototypes])
+        def usable(track):
+            vectors=track.row.get('feature_vectors',[])
+            qualities=track.row.get('feature_quality',[])
+            best=max(qualities,default=0.)
+            samples=[unit(v) for v,q in zip(vectors,qualities) if q>=max(.2,.35*best)]
+            return np.array(samples or [p['e'] for p in track.prototypes])
+        left, right = usable(a), usable(b)
         if left.shape[1] == right.shape[1]:
             scores = (left @ right.T).ravel()
             top3 = float(np.sort(scores)[-min(3, len(scores)):].mean())

@@ -67,6 +67,28 @@ def suppress_body_parts(boxes):
     return boxes[sorted(keep)]
 
 
+def reject_group_boxes(boxes, previous):
+    """Reject a detection covering two separated, already tracked people."""
+    retained = []
+    for box in boxes:
+        covered = []
+        for old in previous:
+            old = np.asarray(old)
+            area = np.maximum(0,old[2:4]-old[:2]).prod()
+            overlap = np.maximum(0,np.minimum(box[2:4],old[2:4])-np.maximum(box[:2],old[:2])).prod()
+            if area > 0 and overlap >= .7*area:
+                covered.append(old)
+        group = False
+        for i,a in enumerate(covered):
+            for b in covered[i+1:]:
+                separation=abs((a[0]+a[2]-b[0]-b[2])/2)
+                if separation > .3*min(a[3]-a[1],b[3]-b[1]):
+                    group = True
+        if not group:
+            retained.append(box)
+    return np.asarray(retained,dtype=boxes.dtype).reshape(-1,boxes.shape[1])
+
+
 class ZoomTracker:
     def __init__(self, model, roi, tracker, log, exclude=None, minimum=(0., 0.)):
         self.model = model
@@ -115,6 +137,7 @@ class ZoomTracker:
             combined = combined[~((foot_x >= left) & (foot_x <= right) &
                                   (foot_y >= top) & (foot_y <= bottom))]
         combined = suppress_body_parts(filter_person_size(combined, frame.shape, self.minimum))
+        combined = reject_group_boxes(combined, [t.xyxy for t in self.tracker.tracked_stracks if t.is_activated])
         self.zoom_seconds += time.perf_counter()-started
         for name,boxes in (("full",full),("fused",combined)):
             for box in boxes:

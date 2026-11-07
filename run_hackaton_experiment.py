@@ -50,7 +50,7 @@ GALLERY_WEIGHT = 0.65      # best quality view + whole-track mean
 PART_WEIGHT = 0.30         # view-tolerant upper/lower clothing evidence
 MIN_OBSERVATIONS = 5       # reject 1-4 frame ByteTrack noise
 ZOOM_ROIS = {}  # Full-frame detection only; crop pass produced head/torso duplicates.
-MIN_PERSON_SIZES = {2: (.016, .065), 4: (.012, .045)}  # camera 3: ~42x127 px; camera 5: ~31x87 px
+MIN_PERSON_SIZES = {2: (.024, .10), 4: (.020, .09)}  # camera 3: ~62x194 px; camera 5: ~52x175 px
 EXCLUDE_ROIS = {
     2: [
         (.659, .204, .935, .372),    # people shown on the wall display
@@ -167,7 +167,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--full", action="store_true", help="Process every frame interval to the end of each video")
     parser.add_argument("--matcher", choices=["v2", "graph"], default="v2")
+    parser.add_argument('--seconds',type=float,default=DURATION_SECONDS)
+    parser.add_argument('--run-name',default=RUN_NAME)
     args = parser.parse_args()
     if args.full and LINK_ONLY:
         parser.error("--full requires LINK_ONLY=False")
-    main(None if args.full else DURATION_SECONDS, args.matcher)
+    if args.seconds<=0:
+        parser.error('--seconds must be positive')
+    if Path(args.run_name).name!=args.run_name:
+        parser.error('--run-name must be a single directory name')
+    RUN_NAME=args.run_name
+    main(None if args.full else args.seconds, args.matcher)

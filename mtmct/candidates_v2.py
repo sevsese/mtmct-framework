@@ -21,6 +21,26 @@ def candidate_pairs(tracks, top_k):
             for j in nearest:
                 if i != indexes[j]:
                     pairs.add(tuple(sorted((i, indexes[j]))))
+        # Query multiple views too: an average alone can hide a valid view.
+        owners=[]
+        prototypes=[]
+        for i in indexes:
+            for p in tracks[i].prototypes:
+                if len(p['e'])==vectors.shape[1]:
+                    owners.append(i)
+                    prototypes.append(p['e'])
+        if prototypes:
+            tree=cKDTree(np.asarray(prototypes))
+            _,nearest=tree.query(prototypes,k=min(len(prototypes),4*(top_k+1)))
+            for owner,neighbors_ in zip(owners,np.asarray(nearest).reshape(len(owners),-1)):
+                selected=set()
+                for neighbor in neighbors_:
+                    other=owners[neighbor]
+                    if other!=owner:
+                        selected.add(other)
+                        pairs.add(tuple(sorted((owner,other))))
+                    if len(selected)>=top_k:
+                        break
     # Preserve short handoffs and overlapping duplicate candidates even when
     # their embeddings are poor. Physical vetoes are still checked on merges.
     for indexes in cameras.values():
