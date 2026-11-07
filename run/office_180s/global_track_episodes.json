@@ -49,11 +49,9 @@
     "person_id": 6,
     "global_track_id": "6:1",
     "start_time": 22.76,
-    "end_time": 162.44,
+    "end_time": 36.44,
     "cameras": [
-      4,
-      3,
-      2
+      4
     ]
   },
   {
@@ -89,6 +87,16 @@
   {
     "person_id": 10,
     "global_track_id": "10:1",
+    "start_time": 78.1,
+    "end_time": 162.44,
+    "cameras": [
+      3,
+      2
+    ]
+  },
+  {
+    "person_id": 11,
+    "global_track_id": "11:1",
     "start_time": 106.84,
     "end_time": 110.92,
     "cameras": [
@@ -96,21 +104,12 @@
     ]
   },
   {
-    "person_id": 11,
-    "global_track_id": "11:1",
+    "person_id": 12,
+    "global_track_id": "12:1",
     "start_time": 123.48,
     "end_time": 130.92,
     "cameras": [
       1
-    ]
-  },
-  {
-    "person_id": 12,
-    "global_track_id": "12:1",
-    "start_time": 127.48,
-    "end_time": 132.52,
-    "cameras": [
-      2
     ]
   },
   {
@@ -156,11 +155,12 @@
   {
     "person_id": 17,
     "global_track_id": "17:1",
-    "start_time": 161.08,
-    "end_time": 165.48,
+    "start_time": 161.96,
+    "end_time": 169.6,
     "cameras": [
+      1,
       2,
-      1
+      3
     ]
   },
   {
@@ -193,24 +193,6 @@
   {
     "person_id": 21,
     "global_track_id": "21:1",
-    "start_time": 163.56,
-    "end_time": 165.64,
-    "cameras": [
-      2
-    ]
-  },
-  {
-    "person_id": 22,
-    "global_track_id": "22:1",
-    "start_time": 164.8,
-    "end_time": 169.6,
-    "cameras": [
-      3
-    ]
-  },
-  {
-    "person_id": 23,
-    "global_track_id": "23:1",
     "start_time": 166.0,
     "end_time": 168.4,
     "cameras": [
@@ -218,9 +200,27 @@
     ]
   },
   {
+    "person_id": 22,
+    "global_track_id": "22:1",
+    "start_time": 176.2,
+    "end_time": 180.92,
+    "cameras": [
+      1
+    ]
+  },
+  {
+    "person_id": 23,
+    "global_track_id": "23:1",
+    "start_time": 177.16,
+    "end_time": 180.92,
+    "cameras": [
+      1
+    ]
+  },
+  {
     "person_id": 24,
     "global_track_id": "24:1",
-    "start_time": 176.2,
+    "start_time": 177.96,
     "end_time": 180.92,
     "cameras": [
       1
@@ -229,24 +229,6 @@
   {
     "person_id": 25,
     "global_track_id": "25:1",
-    "start_time": 177.0,
-    "end_time": 180.92,
-    "cameras": [
-      1
-    ]
-  },
-  {
-    "person_id": 26,
-    "global_track_id": "26:1",
-    "start_time": 177.96,
-    "end_time": 180.92,
-    "cameras": [
-      1
-    ]
-  },
-  {
-    "person_id": 27,
-    "global_track_id": "27:1",
     "start_time": 178.0,
     "end_time": 179.92,
     "cameras": [
@@ -254,8 +236,8 @@
     ]
   },
   {
-    "person_id": 28,
-    "global_track_id": "28:1",
+    "person_id": 26,
+    "global_track_id": "26:1",
     "start_time": 178.56,
     "end_time": 179.92,
     "cameras": [

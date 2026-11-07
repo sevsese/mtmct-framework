@@ -60,8 +60,12 @@ MIN_OBSERVATIONS = 5       # reject 1-4 frame ByteTrack noise
 ZOOM_ROIS = {}  # Full-frame detection only; crop pass produced head/torso duplicates.
 MIN_PERSON_SIZES = {2: (.024, .10), 4: (.020, .09)}  # camera 3: ~62x194 px; camera 5: ~52x175 px
 EXCLUDE_ROIS = {
+    1: [
+        (.100, .150, .205, .225),    # small mirror above the black structure (camera 2)
+    ],
     2: [
         (.659, .204, .935, .372),    # people shown on the wall display
+        (.105, .460, .300, .850),    # standing mirror on the left wall (camera 3)
     ]
 }
 LINK_ONLY = False          # True reuses detections/embeddings from SOURCE_RUN

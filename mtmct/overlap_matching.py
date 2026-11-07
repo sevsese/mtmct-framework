@@ -24,6 +24,29 @@ def overlap_bonus(duration_s, quality, settings):
     return settings.overlap_bonus_weight * min(1., duration_s / 3.) * quality
 
 
+def synchronous_score(a, b, base, start, end, tolerance=.5):
+    """Compare distinct observed crops at nearby timestamps, not whole-track means."""
+    left = [s for s in a.time_samples if start <= a.time(s[2]) < end]
+    right = [s for s in b.time_samples if start <= b.time(s[2]) < end]
+    used, support = set(), []
+    for x in left:
+        nearby = [(abs(a.time(x[2])-b.time(y[2])),j,y) for j,y in enumerate(right)
+                  if j not in used and x[0].shape == y[0].shape]
+        if not nearby:
+            continue
+        dt,j,y = min(nearby,key=lambda r:r[0])
+        if dt <= tolerance:
+            used.add(j)
+            support.append([x[2],y[2],float(x[0]@y[0])])
+    result = dict(base,synchronous_support=support)
+    if len(support) >= 2:
+        visual = float(np.mean([s[2] for s in support]))
+        parts = base.get('appearance_components',{})
+        weight = parts.get('parts_weight',0.)
+        result['similarity'] = (1-weight)*visual+weight*parts.get('parts',visual)
+    return result
+
+
 def _match_window(tracks, overlap_pairs, score_fn, veto_fn, settings,
                    no_match_similarity=.45, margin=.02):
     """One consistent assignment per overlapping camera pair.
@@ -43,12 +66,15 @@ def _match_window(tracks, overlap_pairs, score_fn, veto_fn, settings,
         scores = np.full((len(left), len(right)), -np.inf)
         durations = np.zeros((len(left), len(right)))
         similarities = np.full((len(left), len(right)), np.nan)
+        evidence = {}
         for x, i in enumerate(left):
             for y, j in enumerate(right):
                 tau = simultaneous_duration(tracks[i], tracks[j])
                 if tau <= 0 or veto_fn(i, j):
                     continue
-                similarity = score_fn(i, j).get("similarity")
+                evaluated = score_fn(i,j)
+                evidence[x,y] = evaluated.get('synchronous_support',[])
+                similarity = evaluated.get("similarity")
                 if similarity is None or similarity < no_match_similarity:
                     continue
                 quality = float(np.sqrt(tracks[i].quality * tracks[j].quality))
@@ -92,12 +118,13 @@ def _match_window(tracks, overlap_pairs, score_fn, veto_fn, settings,
                             "score": float(scores[x, y]), "similarity": float(similarities[x, y]),
                             "duration_s": float(durations[x, y]),
                             "bonus_applied": float(scores[x, y] - similarities[x, y]),
-                            "mutual_best": mutual, "ambiguous": ambiguous})
+                            "mutual_best": mutual, "ambiguous": ambiguous,
+                            "synchronous_support":evidence[x,y]})
     return matches
 
 
 def match_overlaps(tracks, overlap_pairs, score_fn, veto_fn, settings,
-                   no_match_similarity=.45, margin=.02):
+                   no_match_similarity=.45, margin=.02, window_score_fn=None):
     """Assignment only competes with people present in the same time interval."""
     results = {}
     for pair in overlap_pairs:
@@ -108,13 +135,25 @@ def match_overlaps(tracks, overlap_pairs, score_fn, veto_fn, settings,
                 continue
             active = [i for i in indexes if tracks[i].interval[0] < end and tracks[i].interval[1] > start]
             matches = _match_window([tracks[i] for i in active], [pair],
-                lambda i,j: score_fn(active[i],active[j]),
+                lambda i,j: (window_score_fn(active[i],active[j],start,end) if window_score_fn
+                             else score_fn(active[i],active[j])),
                 lambda i,j: veto_fn(active[i],active[j]), settings, no_match_similarity, margin)
             for m in matches:
                 i,j = active[m['i']],active[m['j']]
                 key = tuple(sorted((i,j)))
                 record = results.setdefault(key, dict(m, i=i, j=j, windows=[], duration_s=0.))
-                record['windows'].append({'start_s':start,'end_s':end,'ambiguous':m['ambiguous']})
+                record['windows'].append({'start_s':start,'end_s':end,'ambiguous':m['ambiguous'],
+                                         'support':m['synchronous_support']})
                 record['duration_s'] += end-start
                 record['ambiguous'] |= m['ambiguous']
+    for record in results.values():
+        independent = {(a,b):v for w in record['windows'] for a,b,v in w['support']}
+        clear = sum(w['end_s']-w['start_s'] for w in record['windows'] if not w['ambiguous'])
+        record['temporal_agreement'] = clear/max(record['duration_s'],1e-9)
+        record['independent_observations'] = len(independent)
+        record['synchronous_mean'] = float(np.mean(list(independent.values()))) if independent else None
+        # A single favourable window cannot erase ambiguity. Accumulation
+        # requires multiple distinct crops and sustained clear assignments.
+        if len(independent) >= 3 and record['temporal_agreement'] >= .8 and clear >= 1.:
+            record['ambiguous'] = False
     return list(results.values())

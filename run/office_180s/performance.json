@@ -2,46 +2,46 @@
   {
     "camera_id": 0,
     "processed_frames": 2250,
-    "seconds": 190.94,
+    "seconds": 173.42,
     "source_fps": 25.0,
-    "inference_fps": 11.78,
-    "fps": 11.78,
+    "inference_fps": 12.97,
+    "fps": 12.97,
     "peak_cuda_tensor_gib": 0.52
   },
   {
     "camera_id": 1,
     "processed_frames": 2250,
-    "seconds": 188.69,
+    "seconds": 183.81,
     "source_fps": 25.0,
-    "inference_fps": 11.92,
-    "fps": 11.92,
+    "inference_fps": 12.24,
+    "fps": 12.24,
     "peak_cuda_tensor_gib": 0.62
   },
   {
     "camera_id": 2,
     "processed_frames": 2250,
-    "seconds": 207.31,
+    "seconds": 195.21,
     "source_fps": 25.0,
-    "inference_fps": 10.85,
-    "fps": 10.85,
-    "peak_cuda_tensor_gib": 0.66
+    "inference_fps": 11.53,
+    "fps": 11.53,
+    "peak_cuda_tensor_gib": 0.71
   },
   {
     "camera_id": 3,
     "processed_frames": 1800,
-    "seconds": 182.25,
+    "seconds": 162.35,
     "source_fps": 20.0,
-    "inference_fps": 9.88,
-    "fps": 9.88,
-    "peak_cuda_tensor_gib": 0.75
+    "inference_fps": 11.09,
+    "fps": 11.09,
+    "peak_cuda_tensor_gib": 0.8
   },
   {
     "camera_id": 4,
     "processed_frames": 2250,
-    "seconds": 210.23,
+    "seconds": 213.93,
     "source_fps": 25.0,
-    "inference_fps": 10.7,
-    "fps": 10.7,
-    "peak_cuda_tensor_gib": 0.8
+    "inference_fps": 10.52,
+    "fps": 10.52,
+    "peak_cuda_tensor_gib": 0.82
   }
 ]

@@ -132,7 +132,11 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                 "world_x":f"{foot[0]:.4f}" if foot is not None else "",
                                 "world_y":f"{foot[1]:.4f}" if foot is not None else ""})
                             # sample features every few frames, not at every frame
-                            if key["samples"] == 0 or (fid // stride) % sample_every == 0:
+                            # Short appearances need more than one synchronous
+                            # crop. Keep dense evidence for the first 2 seconds;
+                            # both feature reservoirs remain bounded.
+                            if (fid-key['start_frame'] <= 2*video_fps
+                                    or key["samples"] == 0 or (fid // stride) % sample_every == 0):
                                 crop=frame[int(y1):int(y2),int(x1):int(x2)]
                                 if crop.size:
                                     crops.append(cv2.cvtColor(crop,cv2.COLOR_BGR2RGB))

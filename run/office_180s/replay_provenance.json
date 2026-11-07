@@ -1,0 +1,16 @@
+{
+  "source": "runs\\office_v2_180s_occlusion_mirrors_v1",
+  "detector_rerun": false,
+  "reid_rerun": false,
+  "clothing_reextracted": true,
+  "identity_bank_updated": false,
+  "algorithm_files_sha256": {
+    "mtmct/scoring.py": "18363b815e2f2e0789cf50976b78320ff363c540d752bf508748a795bfa4d59d",
+    "mtmct/identity_v2.py": "84d67f5afe5384de2299799feaaa52b4694bd67307394fbf43bf75ef9acb29e1",
+    "mtmct/overlap_matching.py": "12b3ac7dbd1301b60be71067633d3b57505ab48cb4c7703478901cdb7800ad1b",
+    "mtmct/part_features.py": "e1ecf0c2985e14a7d458632d819488a33caf4a7f0cdc8d9c538a16d9406ff4b5",
+    "mtmct/candidates_v2.py": "9fb1e376a790f2d270b49a3d65b699540070399468a76a6605c566de131499f0",
+    "mtmct/tracking.py": "13ad759273f1749f02302d48b8e0dcc8a81266e29e188dfa897a58270163c32b",
+    "run_hackaton_experiment.py": "30803faa70196df5bfdc78c715225f122c787a756264b4855cc98242e981dade"
+  }
+}

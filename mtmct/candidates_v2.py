@@ -47,7 +47,7 @@ def candidate_pairs(tracks, top_k):
         active = []
         for i in sorted(indexes, key=lambda i: tracks[i].interval[0]):
             start = tracks[i].interval[0]
-            active = [j for j in active if tracks[j].interval[1]+1.8 >= start]
+            active = [j for j in active if tracks[j].interval[1]+4. >= start]
             pairs.update(tuple(sorted((i,j))) for j in active)
             active.append(i)
     return sorted(pairs)

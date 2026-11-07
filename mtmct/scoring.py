@@ -71,8 +71,22 @@ class Evidence:
         return [s for s in samples if s[1] >= max(.2, .35 * best)]
 
     @cached_property
+    def time_samples(self):
+        """Whole-track timeline, independent of the best-crop reservoir."""
+        samples = {s[2]:s for s in self.usable_samples}
+        for v,q,f in zip(self.row.get('temporal_vectors',[]),self.row.get('temporal_quality',[]),
+                         self.row.get('temporal_frames',[])):
+            e = unit(v)
+            if e.ndim == 1 and e.size and np.isfinite(e).all() and np.any(e) and .2 <= float(q) <= 1:
+                if self.mean.size and e.shape != self.mean.shape:
+                    continue
+                if int(f) not in samples or float(q) > samples[int(f)][1]:
+                    samples[int(f)] = (e,float(q),int(f),-1)
+        return sorted(samples.values(),key=lambda s:s[2])
+
+    @cached_property
     def temporal_gallery(self):
-        samples = sorted({s[2]:s for s in self.usable_samples}.values(), key=lambda s:s[2])
+        samples = self.time_samples
         result = {}
         for name, indexes in zip(('early','middle','late'), np.array_split(np.arange(len(samples)),3)):
             if not len(indexes):
@@ -187,8 +201,69 @@ def appearance(a, b, cfg, gallery="topk", temporal=False):
             details['early_similarity'] = comparisons.get('early_early')
     if parts:
         details["parts"] = float(np.mean(sorted(parts)[-3:]))
-        similarity = (1 - cfg.part_weight) * similarity + cfg.part_weight * details["parts"]
+        def clothing_quality(track):
+            samples = track.row.get('body_parts',[])
+            measured = [float(p['quality'])*float(np.mean(list(p.get('part_quality',{'legacy':1.}).values())))
+                        for p in samples if 'quality' in p]
+            if measured:
+                coherence = []
+                for i,x in enumerate(samples):
+                    for y in samples[i+1:]:
+                        for name in ('upper','lower'):
+                            u,v = unit(x.get(name,[])),unit(y.get(name,[]))
+                            if u.size and u.shape==v.shape:
+                                coherence.append(float(u@v))
+                return float(np.mean(measured))*max(0.,float(np.mean(coherence)) if coherence else 1.)
+            # Old caches lack per-colour-crop quality: use measured crop
+            # visibility/quality conservatively, never the pair similarity.
+            return track.quality
+        reliability = math.sqrt(clothing_quality(a)*clothing_quality(b)) if temporal else 1.
+        weight = cfg.part_weight * reliability
+        details.update(parts_reliability=reliability,parts_weight=weight)
+        similarity = (1 - weight) * similarity + weight * details["parts"]
     return float(np.clip(similarity, -1, 1)), details
+
+
+def occlusion_evidence(a, b, mean):
+    """Joint appearance/foot-position evidence, independent of camera/identity IDs."""
+    if a.interval[0] > b.interval[0]:
+        a,b = b,a
+    gap = b.interval[0]-a.interval[1]
+    left,right = (t.row.get('observation_boxes') or {} for t in (a,b))
+    if (a.key[0] != b.key[0] or not 1.8 < gap <= 4. or not left or not right
+            or mean is None or mean < .70 or min(a.quality,b.quality) < .30):
+        return None
+    x,y = np.array(left[max(left,key=int)]),np.array(right[min(right,key=int)])
+    sizes = [np.maximum(1.,r[2:]-r[:2]) for r in (x,y)]
+    if min(s[0] for s in sizes)/max(s[0] for s in sizes)<.5 or min(s[1] for s in sizes)/max(s[1] for s in sizes)<.5:
+        return None
+    feet = [np.array([(r[0]+r[2])/2,r[3]]) for r in (x,y)]
+    displacement = float(np.linalg.norm(feet[0]-feet[1])/max(s[1] for s in sizes))
+    if displacement > .35:
+        return None
+    vectors = [np.array([s[0] for s in t.usable_samples]) for t in (a,b)]
+    if min(map(len,vectors)) < 3 or vectors[0].shape[1] != vectors[1].shape[1]:
+        return None
+    scores = vectors[0]@vectors[1].T
+    used_a,used_b,independent = set(),set(),[]
+    for flat in np.argsort(-scores.ravel()):
+        i,j = np.unravel_index(flat,scores.shape)
+        fa,fb = a.usable_samples[i][2],b.usable_samples[j][2]
+        if fa not in used_a and fb not in used_b:
+            used_a.add(fa);used_b.add(fb);independent.append(float(scores[i,j]))
+        if len(independent)==3:
+            break
+    gallery = float(np.mean(independent))
+    if len(independent)<3 or gallery < .67:
+        return None
+    appearance = (1-(mean+gallery)/2)/2
+    # Smooth positional uncertainty: small detector-induced foot jitter
+    # should not dominate otherwise independent appearance evidence.
+    motion = float(1-np.exp(-.5*(displacement/.35)**2))
+    cost = .75*appearance+.25*motion
+    return dict(cost=cost, appearance=appearance, motion=motion, mean=mean,
+                gallery=gallery, gap_s=gap, displacement_heights=displacement,
+                accepted=cost <= (1-.78)/2)
 
 
 def same_view_continuity(a, b, mean):
@@ -220,11 +295,18 @@ def same_view_continuity(a, b, mean):
                 return None
         return "shadowed_duplicate" if duplicate else "overlapping_handoff"
     gap = b.interval[0] - a.interval[1]
-    if not 0 < gap <= 1.8 or mean < (.62 if gap <= .50 else .70) or not left or not right:
+    if not 0 < gap <= 4. or not left or not right:
         return None
     x, y = np.array(left[max(left, key=int)]), np.array(right[min(right, key=int)])
     h = max(x[3]-x[1], y[3]-y[1], 1.)
     center_x, center_y = (x[:2]+x[2:])/2, (y[:2]+y[2:])/2
+    if gap > 1.8:
+        evidence = occlusion_evidence(a,b,mean)
+        if evidence and evidence['accepted']:
+            return 'occlusion_gap_recovery'
+        return None
+    if mean < (.62 if gap <= .50 else .70):
+        return None
     # A longer seam needs a tighter displacement bound, not a global ReID relaxation.
     if np.linalg.norm(center_x-center_y) <= h * (.30 + .20*gap):
         return "short_gap_recovery"

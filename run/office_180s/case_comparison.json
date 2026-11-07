@@ -1,0 +1,128 @@
+[
+  {
+    "case": "door_first",
+    "tracklets": [
+      [
+        2,
+        2
+      ],
+      [
+        2,
+        5
+      ]
+    ],
+    "global_ids": [
+      10,
+      10
+    ],
+    "same": true
+  },
+  {
+    "case": "door_second",
+    "tracklets": [
+      [
+        2,
+        5
+      ],
+      [
+        2,
+        6
+      ]
+    ],
+    "global_ids": [
+      10,
+      10
+    ],
+    "same": true
+  },
+  {
+    "case": "cross_view",
+    "tracklets": [
+      [
+        2,
+        2
+      ],
+      [
+        3,
+        6
+      ]
+    ],
+    "global_ids": [
+      10,
+      10
+    ],
+    "same": true
+  },
+  {
+    "case": "known_different",
+    "tracklets": [
+      [
+        3,
+        3
+      ],
+      [
+        4,
+        6
+      ]
+    ],
+    "global_ids": [
+      5,
+      6
+    ],
+    "same": false
+  },
+  {
+    "case": "initial",
+    "tracklets": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "global_ids": [
+      1,
+      2
+    ],
+    "same": false
+  },
+  {
+    "case": "late_person",
+    "tracklets": [
+      [
+        2,
+        15
+      ],
+      [
+        1,
+        27
+      ]
+    ],
+    "global_ids": [
+      15,
+      23
+    ],
+    "same": false
+  },
+  {
+    "case": "late_overlap",
+    "tracklets": [
+      [
+        1,
+        24
+      ],
+      [
+        0,
+        31
+      ]
+    ],
+    "global_ids": [
+      22,
+      25
+    ],
+    "same": false
+  }
+]

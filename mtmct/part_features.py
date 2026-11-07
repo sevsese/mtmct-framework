@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from .frame_sources import FrameSource
+from .features import crop_quality
 
 
 def _histogram(image: np.ndarray) -> list[float]:
@@ -23,10 +24,25 @@ def _histogram(image: np.ndarray) -> list[float]:
 def body_parts(crop: np.ndarray) -> dict[str, list[float]]:
     """Ignore head/background margins and describe clothing in two bands."""
     height = crop.shape[0]
-    return {
-        "upper": _histogram(crop[int(.12 * height):int(.56 * height)]),
-        "lower": _histogram(crop[int(.56 * height):int(.96 * height)]),
-    }
+    width = crop.shape[1]
+    result = {'part_quality':{}, 'schema':'colour-visibility-v2'}
+    shape = min(1.,width/max(.25*height,1.))
+    for name,top,bottom in [('upper',.12,.56),('lower',.56,.96)]:
+        band = crop[int(top*height):int(bottom*height)]
+        center = band[:,int(.15*width):max(int(.85*width),int(.15*width)+1)]
+        edges = np.concatenate((band[:,:max(1,int(.15*width))],band[:,int(.85*width):]),axis=1)
+        hist,bg = _histogram(center),_histogram(edges)
+        result[name] = hist
+        if center.size and hist and bg:
+            gray = cv2.cvtColor(center,cv2.COLOR_BGR2GRAY)
+            exposure = float(np.mean((gray>10)&(gray<245)))
+            separation = max(0.,1-float(np.dot(hist,bg)))
+            # Conservative proxy, not a segmentation/pose confidence: a
+            # colour band indistinguishable from its margins is weak evidence.
+            result['part_quality'][name] = shape*exposure*(.2+.8*separation)
+        else:
+            result['part_quality'][name] = 0.
+    return result
 
 
 def attach_body_parts(tracklets: list[dict], observations_path: str | Path,
@@ -81,7 +97,13 @@ def attach_body_parts(tracklets: list[dict], observations_path: str | Path,
                     left, top = max(0, int(x1)), max(0, int(y1))
                     right, bottom = min(width, int(x2)), min(height, int(y2))
                     if right - left >= min_width and bottom - top >= min_height:
-                        by_key[key]["body_parts"].append(body_parts(frame[top:bottom, left:right]))
+                        crop = frame[top:bottom, left:right]
+                        sample = body_parts(crop)
+                        sample['quality'] = crop_quality(cv2.cvtColor(crop,cv2.COLOR_BGR2RGB),1.,
+                            left==0 or top==0 or right==width or bottom==height)
+                        measured = dict(zip(by_key[key].get('feature_frames',[]),by_key[key].get('feature_quality',[])))
+                        sample['quality'] = min(sample['quality'],float(measured.get(frame_id,sample['quality'])))
+                        by_key[key]["body_parts"].append(sample)
         finally:
             reader.close()
 

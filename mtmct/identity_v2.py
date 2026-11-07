@@ -10,7 +10,7 @@ from math import isfinite
 
 import numpy as np
 
-from .scoring import Evidence, physical, same_view_continuity, score
+from .scoring import Evidence, physical, same_view_continuity, occlusion_evidence, score
 from .candidates_v2 import candidate_pairs
 
 
@@ -164,6 +164,7 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
         return conflict
 
     def compatible(a, b, route_support=False):
+        costs = []
         for i in members[a]:
             for j in members[b]:
                 if veto(i, j):
@@ -172,6 +173,13 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
                     continue
                 edge = pair_score(min(i,j), max(i,j))
                 parts = edge['appearance_components']
+                if settings.separate_hypotheses:
+                    # Missing or weak pairwise evidence is neutral. Aggregate
+                    # the available evidence instead of imposing an overlap gate
+                    # on every pair in an otherwise supported component.
+                    if edge['cost'] is not None:
+                        costs.append((edge['cost'],edge['modality_reliability']['appearance']))
+                    continue
                 # Insufficient evidence is not a cannot-link; contradictory
                 # appearance or a failed short local seam cannot be bypassed.
                 if (not settings.separate_hypotheses and parts.get('mean', 1.) < .55 and parts.get('gallery_top3', 1.) < .55):
@@ -183,6 +191,8 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
                 if (tracks[i].key[0] == tracks[j].key[0]
                         and 0 < edge['gap_s'] <= 1.8):
                     return False
+        if costs and sum(w for _,w in costs)>0:
+            return sum(c*w for c,w in costs)/sum(w for _,w in costs) <= cfg.max_cost
         return True
 
     def unite(a, b):
@@ -212,6 +222,8 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
             edge.update(pair_score(i, j))
             seam = recovery(i, j)
             if seam:
+                if seam == 'occlusion_gap_recovery':
+                    edge['continuity_evidence'] = occlusion_evidence(left,right,edge['appearance_components']['mean'])
                 edge.update(conflict=None, continuity=seam, state="candidate", decision="deferred",
                             reason="verified_same_view_continuity")
                 continue
@@ -239,6 +251,9 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
             similarity = edge["similarity"]
             independent_geometry = edge["sync_samples"] >= 2 and edge["spatial"] <= .25
             long_gap = cfg.use_time and edge["gap_s"] > cfg.max_gap_seconds
+            gap_fraction = min(1.,edge['gap_s']/max(cfg.max_gap_seconds,1e-9)) if cfg.use_time else 0.
+            reentry_floor = (settings.unsupported_similarity + gap_fraction *
+                             (settings.reentry_similarity-settings.unsupported_similarity))
             if edge["cost"] is None or edge["reliability"] < settings.min_reliability:
                 edge["reason"] = "insufficient_evidence"
             elif not independent_geometry and (similarity is None or similarity < cfg.min_similarity):
@@ -248,6 +263,10 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
                 edge["reason"] = "unconfirmed_without_topology"
             elif long_gap and (similarity is None or similarity < settings.reentry_similarity):
                 edge["reason"] = "unconfirmed_reentry"
+            elif (settings.separate_hypotheses and edge['topology']=='unknown'
+                  and edge['gap_s']>0 and similarity < reentry_floor):
+                edge.update(state='provisional',decision='deferred',reason='insufficient_reentry_support',
+                            required_similarity=reentry_floor)
             elif edge["cost"] > cfg.max_cost:
                 edge["reason"] = "high_cost"
             else:
@@ -306,11 +325,13 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
         edge.update(state="confirmed", decision="accepted", reason="anchor_edge", stage="seed")
 
     if settings.overlap_matching_enabled and cfg.use_time and cfg.transition_model:
-        from .overlap_matching import match_overlaps
+        from .overlap_matching import match_overlaps, synchronous_score
         lookup = {(e['i'],e['j']):e for e in edges}
         matches = match_overlaps(tracks,cfg.transition_model.overlap_pairs,
             lambda i,j: pair_score(min(i,j),max(i,j)),veto,settings,
-            no_match_similarity=cfg.min_similarity,margin=max(.02,settings.margin))
+            no_match_similarity=cfg.min_similarity,margin=max(.02,settings.margin),
+            window_score_fn=lambda i,j,start,end:synchronous_score(tracks[i],tracks[j],
+                pair_score(min(i,j),max(i,j)),start,end))
         for match in matches:
             i,j = sorted((match['i'],match['j']))
             edge = lookup[i,j]
@@ -321,9 +342,12 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
             p = edge['appearance_components']
             strong = (p.get('mean',-1.) >= (settings.cross_camera_mean or .72)
                       and p.get('gallery_top3',-1.) >= settings.cross_camera_gallery)
+            temporal_strong = (match.get('independent_observations',0) >= 3
+                               and (match.get('synchronous_mean') or -1.) >= .72
+                               and match.get('temporal_agreement',0.) >= .8)
             a,b = root(i),root(j)
-            if (strong and not match['ambiguous'] and i in anchors and j in anchors
-                    and edge['cost'] <= cfg.max_cost and compatible(a,b)):
+            if ((strong or temporal_strong) and not match['ambiguous'] and i in anchors and j in anchors
+                    and edge['cost'] <= cfg.max_cost and compatible(a,b,route_support=temporal_strong)):
                 if a != b:
                     unite(a,b)
                 edge.update(state='confirmed',decision='accepted',stage='overlap')
