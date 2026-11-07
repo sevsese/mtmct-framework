@@ -10,20 +10,22 @@ import subprocess
 import sys
 import threading
 import uuid
+from typing import Literal
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
-from backend.adapter import ROOT, ARTIFACTS, build_index, read_json, rows, observation_dto, video_info
+from backend.adapter import ROOT, ARTIFACTS, build_index, read_json, rows, observation_dto, office_camera_ids, video_info
 from backend.floor_map import fit as fit_floor, project as project_floor
 
 STORE = Path(os.environ.get('MTMCT_WEB_STORE', ROOT/'data/web')).resolve()
 STORE.mkdir(parents=True, exist_ok=True)
 executor = ThreadPoolExecutor(max_workers=1)
 lock = threading.RLock()
+reviews = {}
 
 
 def now():
@@ -130,16 +132,18 @@ def register(folder, name, mode, cameras, owned=None):
 
 
 def office_floor(owned, result, cameras):
-    """Load the project's existing office plan and calibration for cameras 0..4."""
+    """Load the existing approximate calibration for the five office videos."""
     config_path = ROOT/'configs'/'hackaton_office_map_approx.json'
-    plan_path = Path.home()/'Downloads'/'office_camera.png'
-    camera_ids = {int(camera['camera_id']) for camera in cameras}
-    if camera_ids != set(range(5)) or not config_path.is_file() or not plan_path.is_file():
+    plan_path = ROOT/'data'/'Hackaton Data'/'office_camera.png'
+    if not plan_path.is_file():
+        plan_path = Path.home()/'Downloads'/'office_camera.png'
+    ids = office_camera_ids(cameras)
+    if not ids or not config_path.is_file() or not plan_path.is_file():
         return
     config = read_json(config_path.parent, config_path.name)
     calibrations = {}
-    for camera_id in camera_ids:
-        row = config['cameras'][str(camera_id)]
+    for camera_id, office_id in ids.items():
+        row = config['cameras'][str(office_id)]
         points = [
             {'video': video, 'plan': plan}
             for video, plan in zip(row['image_points_norm'], row['map_points_norm'])
@@ -250,7 +254,11 @@ def detail(identifier: str):
     durations = [c['duration'] + c.get('offset', 0) for c in d['cameras'] if c.get('duration') is not None]
     counts['duration'] = max(durations) if durations else None
     counts.update(rows(db,'SELECT MIN(timestamp) result_start,MAX(timestamp) result_end FROM observations')[0])
-    return public(d) | {'summary': counts, 'job': read_json(directory(identifier), 'job.json')}
+    fields = public(d)
+    if d['mode'] == 'raw' and d['status'] != 'ready':
+        fields['warnings'] = [warning for warning in fields['warnings']
+                              if not warning.startswith(('Нет manifest.json', 'Нет CSV наблюдений'))]
+    return fields | {'summary': counts, 'job': read_json(directory(identifier), 'job.json')}
 
 
 @app.get('/api/datasets/{identifier}/cameras')
@@ -266,6 +274,66 @@ def video(identifier: str, camera_id: int):
     if not c or not c.get('path') or not Path(c['path']).is_file():
         raise HTTPException(404, 'Видео камеры не подключено')
     return FileResponse(c['path'])
+
+
+def review_target(identifier, global_id):
+    from backend.export_review import review_window
+
+    data = dataset(identifier)
+    if data['status'] != 'ready':
+        raise HTTPException(409, 'Сначала завершите трекинг')
+    owned = directory(identifier)
+    start, end, _ = review_window(owned, data, global_id)
+    stamp = (owned/'index.sqlite').stat().st_mtime_ns
+    variant = 'all' if global_id is None else str(global_id)
+    return owned/f'review-v2-{stamp}-{variant}.mp4', start, end
+
+
+def render_review(output, global_id):
+    temporary = output.with_suffix('.partial.mp4')
+    temporary.unlink(missing_ok=True)
+    command = [sys.executable, '-m', 'backend.export_review', str(output.parent),
+               str(temporary), '--cameras-only']
+    if global_id is not None:
+        command += ['--global-id', str(global_id)]
+    env = dict(os.environ, PYTHONIOENCODING='utf-8', OPENCV_FFMPEG_THREADS='1')
+    try:
+        with output.with_suffix('.log').open('w+', encoding='utf-8') as log:
+            result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=log)
+            if result.returncode:
+                log.seek(0)
+                message = log.read().strip().splitlines()
+                raise RuntimeError(message[-1] if message else 'Ошибка кодирования MP4')
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@app.get('/api/datasets/{identifier}/review')
+@app.post('/api/datasets/{identifier}/review')
+def review(identifier: str, request: Request, global_id: int | None = Query(None, ge=0)):
+    output, start, end = review_target(identifier, global_id)
+    query = '' if global_id is None else f'?global_id={global_id}'
+    with lock:
+        if output.is_file():
+            return {'status': 'ready', 'start': start, 'end': end,
+                    'url': f'/api/datasets/{identifier}/review/video{query}'}
+        job = reviews.get(output)
+        if request.method == 'POST' and (job is None or job.done()) and not output.is_file():
+            job = reviews[output] = executor.submit(render_review, output, global_id)
+        if job is None:
+            return {'status': 'idle'}
+        if job.done() and job.exception():
+            return {'status': 'failed', 'error': str(job.exception())}
+        return {'status': 'running' if job.running() or job.done() else 'queued'}
+
+
+@app.get('/api/datasets/{identifier}/review/video')
+def review_video(identifier: str, global_id: int | None = Query(None, ge=0)):
+    output, _, _ = review_target(identifier, global_id)
+    if not output.is_file():
+        raise HTTPException(404, 'Мозаика ещё не готова')
+    return FileResponse(output, media_type='video/mp4')
 
 
 @app.get('/api/datasets/{identifier}/tracks')
@@ -294,7 +362,26 @@ def track_detail(identifier: str, global_id: int):
     keys = {(r['camera_id'], r['local_id']) for r in result['local_tracklets']}
     indices = {i for i,t in enumerate(local) if (t['camera_id'],t['local_id']) in keys}
     edges = [e for e in read_json(folder, 'association_edges.json', []) if e.get('i') in indices or e.get('j') in indices]
-    return result | {'association_edges': edges[:200], 'association_edges_total': len(edges)}
+    timestamps = rows(directory(identifier)/'index.sqlite',
+                      'SELECT DISTINCT timestamp FROM observations WHERE global_id=? '
+                      'AND timestamp IS NOT NULL ORDER BY timestamp', [global_id])
+    episodes = []
+    for sample in timestamps:
+        t = sample['timestamp']
+        if not episodes or t - episodes[-1]['end_time'] > 10:
+            episodes.append({'global_track_id': f'{global_id}.{len(episodes)+1}',
+                             'start_time': t, 'end_time': t})
+        else:
+            episodes[-1]['end_time'] = t
+    identity = read_json(folder, 'identity_state.json', {})
+    identity_state = identity.get('states', {}).get(str(global_id))
+    identity_events = [e for e in identity.get('events', [])
+                       if global_id in [e.get('global_id'), e.get('from'), e.get('to')]
+                       or global_id in (e['from'] if isinstance(e.get('from'), list) else [])
+                       or global_id in (e['to'] if isinstance(e.get('to'), list) else [])]
+    return result | {'episodes': episodes, 'association_edges': edges[:200],
+                     'identity_state': identity_state, 'identity_events': identity_events,
+                     'association_edges_total': len(edges)}
 
 
 @app.get('/api/datasets/{identifier}/observations')
@@ -353,6 +440,7 @@ class ProcessOptions(BaseModel):
     max_frames: int = Field(default=0, ge=0, le=1000000)
     max_seconds: float | None = Field(default=None,gt=0,le=86400,allow_inf_nan=False)
     device: str = Field(default='cuda:0', pattern=r'^(cpu|cuda:[0-9]+)$')
+    matcher: Literal['v2','graph'] = 'v2'
 
 
 def run_job(identifier, options):
@@ -360,11 +448,12 @@ def run_job(identifier, options):
     job = read_json(owned,'job.json')
     d = dataset(identifier)
     out = owned/'result'
-    spec = {'scene': d['source'], 'output': str(out), 'cameras': d['cameras'], 'options': options}
-    save(owned/'worker.json',spec)
-    job.update(status='running', started_at=now(), phase='tracking')
-    save(owned/'job.json',job)
     try:
+        spec = {'scene': d['source'], 'output': str(out), 'cameras': d['cameras'],
+                'options': options | {'resume': True}}
+        save(owned/'worker.json',spec)
+        job.update(status='running', started_at=now(), phase='tracking')
+        save(owned/'job.json',job)
         env = dict(os.environ, PYTHONIOENCODING='utf-8', OPENCV_FFMPEG_THREADS='1', HF_HUB_OFFLINE='1')
         with (owned/'job.log').open('w',encoding='utf-8') as log:
             process = subprocess.Popen([sys.executable,'-u','-m','backend.worker',str(owned/'worker.json')],

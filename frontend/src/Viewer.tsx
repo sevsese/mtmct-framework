@@ -2,7 +2,7 @@ import { useEffect,useRef,useState } from 'react';
 import { Alert,Button,Checkbox,Group,MultiSelect,NumberInput,Select,Slider,Text } from '@mantine/core';
 import { Maximize2,Pause,Play,Video } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
-import { api,Camera,Observation,Track,cameraTime,color,observationsAtFrame,shouldSeekVideo,time,useApi,videoPlaybackRate } from './api';
+import { api,Camera,Observation,Track,cameraTime,color,observationsAtFrame,post,shouldSeekVideo,time,useApi,videoPlaybackRate } from './api';
 
 function CameraPanel({camera,dataset,clock,playing,master,boxes,globalId,onMasterFrame,onError}:{camera:Camera;dataset:string;clock:number;playing:boolean;master:boolean;boxes:boolean;globalId:number|null;onMasterFrame:()=>void;onError:(message:string)=>void}){
   const video=useRef<HTMLVideoElement>(null),canvas=useRef<HTMLCanvasElement>(null),container=useRef<HTMLDivElement>(null);
@@ -57,7 +57,7 @@ function CameraPanel({camera,dataset,clock,playing,master,boxes,globalId,onMaste
     {!camera.fps&&<Text size="xs" c="yellow">FPS неизвестен — привязка рамок ко времени недоступна</Text>}{error&&<Alert color="red">{error}</Alert>}</div>
 }
 
-export function Viewer({id}:{id:string}){
+function CameraViewer({id}:{id:string}){
   const {data:cameras,error}=useApi<Camera[]>(`/api/datasets/${id}/cameras`);const [params]=useSearchParams();
   const {data:details}=useApi(`/api/datasets/${id}`);
   const [clock,setClock]=useState(Number(params.get('time')||0)),[playing,setPlaying]=useState(false),[masterStarted,setMasterStarted]=useState(false),[boxes,setBoxes]=useState(true),[selected,setSelected]=useState<string[]>([]),[columns,setColumns]=useState('3'),[failure,setFailure]=useState('');
@@ -76,5 +76,104 @@ export function Viewer({id}:{id:string}){
     <div className="camera-grid" style={{gridTemplateColumns:`repeat(${columns},minmax(0,1fr))`}}>{shown.map(c=><CameraPanel key={c.camera_id} camera={c} dataset={id} clock={clock} playing={playing&&(c.camera_id===master||masterStarted)} master={c.camera_id===master} boxes={boxes} globalId={gid===''?null:Number(gid)} onMasterFrame={startFromMaster} onError={message=>{setPlaying(false);setFailure(message)}}/>)}</div>
     {!cameras?.length&&<div className="empty">Подключите видео или загрузите результаты с Camera ID</div>}
     <div className="transport"><Button onClick={()=>{if(playing)setPlaying(false);else{setMasterStarted(false);setPlaying(true)}}} disabled={master===undefined} leftSection={playing?<Pause size={16}/>:<Play size={16}/>}>{playing?'Пауза':'Воспроизвести'}</Button><Text ff="monospace">{time(clock)}</Text><Slider aria-label="Общий таймлайн" min={min} max={max} step={.0333333} value={clock} onChange={v=>{setPlaying(false);setMasterStarted(false);clockRef.current=v;setClock(v)}} label={time} style={{flex:1}}/><Text c="dimmed" ff="monospace">{time(max)}</Text></div>
+  </>;
+}
+
+type Review = {
+  status: 'idle' | 'queued' | 'running' | 'ready' | 'failed';
+  url?: string;
+  start?: number;
+  error?: string;
+};
+
+function Mosaic({id, globalId, initialTime}: {id:string; globalId:string; initialTime:number|null}) {
+  const url = `/api/datasets/${id}/review${globalId === '' ? '' : `?global_id=${globalId}`}`;
+  const [review, setReview] = useState<Review>();
+  const [error, setError] = useState('');
+  const [requesting, setRequesting] = useState(false);
+  const {data:track} = useApi<Track>(globalId === '' ? null : `/api/datasets/${id}/tracks/${globalId}`);
+  const player = useRef<HTMLVideoElement>(null);
+  const seekTime = initialTime ?? track?.start_time;
+  const busy = review?.status === 'queued' || review?.status === 'running';
+
+  useEffect(() => {
+    const abort = new AbortController();
+    function refresh() {
+      api<Review>(url, {signal:abort.signal}).then(value => {
+        setReview(value);
+        setError('');
+      }).catch(e => {
+        if (e.name !== 'AbortError') setError(e.message);
+      });
+    }
+    if (!review) refresh();
+    const timer = busy ? setInterval(refresh, 2000) : undefined;
+    return () => { abort.abort(); clearInterval(timer); };
+  }, [url, busy, Boolean(review)]);
+
+  useEffect(() => {
+    const video = player.current;
+    if (video && video.readyState >= 1 && seekTime != null && review?.start != null) {
+      video.currentTime = Math.max(0, seekTime - review.start);
+    }
+  }, [seekTime, review?.url, review?.start]);
+
+  async function prepare() {
+    setRequesting(true);
+    setError('');
+    try {
+      setReview(await post(url, {}));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRequesting(false);
+    }
+  }
+
+  return <>
+    {(error || review?.error) && <Alert color="red" mb="md">{error || review?.error}</Alert>}
+    {review?.status === 'ready' ? <>
+      <video ref={player} src={review.url} controls playsInline preload="metadata"
+        style={{width:'100%', maxHeight:'78vh', background:'#000'}}
+        onLoadedMetadata={e => {
+          if (seekTime != null) e.currentTarget.currentTime = Math.max(0, seekTime - (review.start ?? 0));
+        }}
+        onError={() => setError('Не удалось воспроизвести подготовленный MP4')} />
+      <Button component="a" href={review.url} download variant="light" mt="sm">Скачать MP4</Button>
+    </> : <Group>
+      <Button onClick={prepare} loading={requesting || busy}>Подготовить MP4</Button>
+      {review?.status === 'queued' && <Text>Мозаика в очереди за текущей задачей.</Text>}
+      {review?.status === 'running' && <Text>Декодируем камеры и записываем видео с рамками.</Text>}
+    </Group>}
+  </>;
+}
+
+export function Viewer({id}:{id:string}) {
+  const [params] = useSearchParams();
+  const {data, error} = useApi<{status:string}>(`/api/datasets/${id}`);
+  const {data:cameras} = useApi<Camera[]>(`/api/datasets/${id}/cameras`);
+  const [original, setOriginal] = useState(false);
+  const [selection, setSelection] = useState<number|string>(params.get('global') ?? '');
+  const globalId = /^\d+$/.test(String(selection)) ? String(selection) : '';
+  const rawTime = params.get('time');
+  const initialTime = rawTime !== null && Number.isFinite(Number(rawTime)) ? Number(rawTime) : null;
+  useEffect(() => setSelection(params.get('global') ?? ''), [params]);
+  if (error) return <Alert color="red">{error}</Alert>;
+  if (!data || !cameras) return <Text>Загрузка…</Text>;
+  if (data.status !== 'ready' || !cameras.some(c => c.video_url)) return <CameraViewer id={id} />;
+  return <>
+    <Group mb="md">
+      <Button variant={original ? 'light' : 'filled'} onClick={() => setOriginal(false)}>Синхронная мозаика</Button>
+      <Button variant={original ? 'filled' : 'light'} onClick={() => setOriginal(true)}>Отдельные камеры</Button>
+    </Group>
+    {original ? <><Alert color="yellow" mb="md">Отдельные камеры могут расходиться при воспроизведении и перемотке.</Alert><CameraViewer id={id} /></> :
+      <section className="panel">
+        <h1>Синхронная мозаика</h1>
+        <Text mb="md" c="dimmed">Один MP4 со всеми камерами и рамками. Положение камер во времени задано их смещениями.</Text>
+        <NumberInput mb="md" w={200} label="Выбрать Global ID" placeholder="Все Global ID"
+          min={0} allowDecimal={false} value={selection} onChange={setSelection} />
+        <Mosaic key={`${id}:${globalId}`} id={id} globalId={globalId}
+          initialTime={globalId === (params.get('global') ?? '') ? initialTime : null} />
+      </section>}
   </>;
 }

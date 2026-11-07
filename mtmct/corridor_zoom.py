@@ -11,10 +11,45 @@ from ultralytics.utils import YAML
 from ultralytics.utils.checks import check_yaml
 
 
+def distinct_crop_boxes(full, crop):
+    """Keep crop-only detections; retain the full-view box for near-duplicates."""
+    if not len(full) or not len(crop):
+        return crop
+    whole = full[:, :4]
+    part = crop[:, :4]
+    intersection = np.maximum(
+        0, np.minimum(part[:, None, 2:], whole[None, :, 2:]) -
+        np.maximum(part[:, None, :2], whole[None, :, :2])
+    ).prod(axis=2)
+    smaller_area = np.minimum(
+        (part[:, 2:] - part[:, :2]).prod(axis=1)[:, None],
+        (whole[:, 2:] - whole[:, :2]).prod(axis=1)[None, :]
+    )
+    part_foot = np.column_stack(((part[:, 0] + part[:, 2]) / 2, part[:, 3]))
+    whole_foot = np.column_stack(((whole[:, 0] + whole[:, 2]) / 2, whole[:, 3]))
+    distance = np.linalg.norm(part_foot[:, None] - whole_foot[None], axis=2)
+    smaller_height = np.minimum((part[:, 3] - part[:, 1])[:, None],
+                                (whole[:, 3] - whole[:, 1])[None, :])
+    duplicate = (smaller_area > 0) & (intersection >= .85 * smaller_area) & (
+        distance <= .15 * smaller_height
+    )
+    return crop[~duplicate.any(axis=1)]
+
+
+def filter_person_size(boxes, shape, minimum):
+    """Minimum width/height fractions in original camera coordinates."""
+    if len(minimum) != 2 or not all(np.isfinite(v) and 0 <= v < 1 for v in minimum):
+        raise ValueError("Minimum person size must be two fractions in [0,1)")
+    h, w = shape[:2]
+    return boxes[((boxes[:, 2]-boxes[:, 0]) >= minimum[0]*w) &
+                 ((boxes[:, 3]-boxes[:, 1]) >= minimum[1]*h)]
+
+
 class ZoomTracker:
-    def __init__(self, model, roi, tracker, log, exclude=None):
+    def __init__(self, model, roi, tracker, log, exclude=None, minimum=(0., 0.)):
         self.model = model
         self.roi = roi
+        self.minimum = minimum
         self.exclude = [] if exclude is None else (
             [exclude] if len(exclude) == 4 and isinstance(exclude[0], (int, float)) else exclude
         )
@@ -44,6 +79,7 @@ class ZoomTracker:
             crop = crop[(crop[:,0]>2) & (crop[:,2]<r-x-2) &
                         ((y==0) | (crop[:,1]>2)) & (crop[:,3]<b-y-2)]
             crop[:,:4] += [x,y,x,y]
+            crop = distinct_crop_boxes(full,crop)
             combined = np.concatenate((full,crop))
             if len(crop):
                 rects=combined[:,:4].copy()
@@ -56,6 +92,7 @@ class ZoomTracker:
             foot_y = combined[:,3]
             combined = combined[~((foot_x >= left) & (foot_x <= right) &
                                   (foot_y >= top) & (foot_y <= bottom))]
+        combined = filter_person_size(combined, frame.shape, self.minimum)
         self.zoom_seconds += time.perf_counter()-started
         for name,boxes in (("full",full),("fused",combined)):
             for box in boxes:

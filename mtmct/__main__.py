@@ -40,10 +40,10 @@ def main():
     p.add_argument("--geometry",action="store_true",help="Use validated floor geometry")
     p.add_argument("--time",action=argparse.BooleanOptionalAction,default=True,
                    help="Enable time constraints (use --no-time only for diagnostics)")
-    p.add_argument("--matcher",choices=["baseline","graph"],default="graph")
+    p.add_argument("--matcher",choices=["baseline","graph","v2"],default="graph")
     p.add_argument("--allow-same-camera-fragments",action=argparse.BooleanOptionalAction,
                    default=True)
-    p.add_argument("--gallery-weight",type=float,default=0.65)
+    p.add_argument("--gallery-weight",type=float,default=None)
     p.add_argument("--part-weight",type=float,default=0.30)
     p.add_argument("--min-observations",type=int,default=3)
     p.add_argument("--memory",action="store_true")
@@ -92,7 +92,7 @@ def main():
         run(scene_dir,out,a.model,"osnet",None,a.device,a.max_frames,1,
             a.sample_every,a.imgsz,a.conf,reid_model=a.reid_model,cameras=a.cameras,tracker=a.tracker)
 
-    if a.part_weight > 0 and (out/"local_tracklets.json").is_file():
+    if a.part_weight > 0 and (not a.link_only or a.matcher != "v2") and (out/"local_tracklets.json").is_file():
         tracklets_path=out/"local_tracklets.json"
         tracklets=json.loads(tracklets_path.read_text(encoding="utf-8"))
         sources={camera:scene_dir/"videos"/f"Camera_{camera:04d}.mp4" for camera in a.cameras}
@@ -102,7 +102,8 @@ def main():
     cfg=Config(appearance_weight=0.95,spatial_weight=0.0 if not a.geometry else 0.20,
                temporal_weight=0.05,max_cost=a.max_cost,
                min_similarity=a.min_similarity,use_geometry=a.geometry,
-               use_time=a.time,gallery_weight=a.gallery_weight,part_weight=a.part_weight,
+               use_time=a.time,gallery_weight=a.gallery_weight if a.gallery_weight is not None else (.25 if a.matcher=="v2" else .65),
+               part_weight=a.part_weight,
                camera_offsets_s=parse_offsets(a.camera_offset),
                transition_model=CameraTransitionModel.from_json(a.topology) if a.topology else None)
     if not a.time:
@@ -117,7 +118,7 @@ def main():
         render(scene_dir,predictions,out/"mosaic.mp4",a.max_frames,1,a.scale,a.cameras)
     cross=sum(len({c for c,l in mapping if mapping[(c,l)]==gid})>1
               for gid in set(mapping.values()))
-    accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher=="graph" else len(edges)
+    accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher!="baseline" else len(edges)
     print(f"DONE: {len(tracklets)} local tracks, {accepted} accepted edges, "
           f"{cross} cross-camera global IDs")
     if not a.link_only or a.render_link_only:

@@ -8,11 +8,12 @@ from pathlib import Path
 
 import ijson
 
-from mtmct.cache import write_config
+from backend.adapter import office_camera_ids
+from mtmct.cache import fingerprint, validate_cache, write_config
 from run_hackaton_experiment import (
     CONF, EXCLUDE_ROIS, FRAME_STRIDE, GALLERY_WEIGHT, GLOBAL_MAX_GAP_SECONDS,
     IMGSZ, MIN_OBSERVATIONS, MIN_SIMILARITY, MODEL, PART_WEIGHT, REID_MODEL,
-    TOPOLOGY, TRACKER, ZOOM_ROIS,
+    TOPOLOGY, TRACKER, ZOOM_ROIS, MIN_PERSON_SIZES,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +31,7 @@ def frame_limit(options, camera):
     return limit
 
 
-def tracking_config(camera_id):
+def tracking_config(camera_id, office_id=None):
     return {
         "stride": FRAME_STRIDE,
         "sample_every": 5,
@@ -38,8 +39,9 @@ def tracking_config(camera_id):
         "conf": CONF,
         "tracker": str(TRACKER),
         "reid_model": REID_MODEL,
-        "zoom_rois": {camera_id: ZOOM_ROIS[camera_id]} if camera_id in ZOOM_ROIS else {},
-        "exclude_rois": {camera_id: EXCLUDE_ROIS[camera_id]} if camera_id in EXCLUDE_ROIS else {},
+        "zoom_rois": {camera_id: ZOOM_ROIS[office_id]} if office_id in ZOOM_ROIS else {},
+        "exclude_rois": {camera_id: EXCLUDE_ROIS[office_id]} if office_id in EXCLUDE_ROIS else {},
+        "min_person_sizes": {camera_id: MIN_PERSON_SIZES[office_id]} if office_id in MIN_PERSON_SIZES else {},
     }
 
 
@@ -51,7 +53,8 @@ def track_camera(spec, camera):
     cv2.setNumThreads(1)
     torch.set_num_threads(1)
     output = Path(spec["output"]) / f"camera_{camera['camera_id']}"
-    settings = tracking_config(camera["camera_id"])
+    office_id = office_camera_ids(spec["cameras"]).get(camera["camera_id"])
+    settings = tracking_config(camera["camera_id"], office_id)
     track(
         Path(spec["scene"]), output, str(ROOT / MODEL), "osnet", None,
         spec["options"]["device"], frame_limit(spec["options"], camera),
@@ -59,7 +62,39 @@ def track_camera(spec, camera):
         reid_model=settings["reid_model"], cameras=[camera["camera_id"]],
         tracker=settings["tracker"], camera_sources={camera["camera_id"]: Path(camera["path"])},
         zoom_rois=settings["zoom_rois"], exclude_rois=settings["exclude_rois"],
+        min_person_sizes=settings["min_person_sizes"],
     )
+
+
+def camera_cache_matches(part, camera, options, expected):
+    files = ("manifest.json", "performance.json", "observations.csv", "local_tracklets.json")
+    if not all((part / name).is_file() for name in files):
+        return False
+    try:
+        manifest = validate_cache(part)
+        camera_id = str(camera["camera_id"])
+        saved = manifest["tracking_config"]
+        expected = json.loads(json.dumps(expected))
+        model = manifest["models"]["detector"]
+        reid = manifest["models"]["reid"]
+        limit = frame_limit(options, camera)
+        source = str(Path(camera["path"]).resolve())
+        performance = json.loads((part/"performance.json").read_text(encoding="utf-8"))
+        return (
+            all(saved.get(key) == value for key, value in expected.items())
+            and saved.get("max_frames") == limit
+            and str(Path(saved["camera_sources"][camera_id]).resolve()) == source
+            and any(item["path"] == source for item in manifest["inputs"])
+            and model["sha256"] == fingerprint(ROOT / MODEL)["sha256"]
+            and reid["sha256"] == fingerprint(reid["path"])["sha256"]
+            and len(performance) == 1
+            and performance[0]["camera_id"] == camera["camera_id"]
+            and performance[0]["processed_frames"] > 0
+            and (not limit or performance[0]["processed_frames"] >=
+                 math.ceil(min(limit, round(camera["duration"] * camera["fps"])) / expected["stride"]))
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def merge_camera_outputs(output, parts):
@@ -91,11 +126,13 @@ def main():
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     output = Path(spec["output"])
     cameras = spec["cameras"]
+    office_ids = office_camera_ids(cameras)
     options = spec["options"]
+    matcher = options.get("matcher", "v2")
     if not (ROOT / MODEL).is_file():
         raise FileNotFoundError(f"Модель отсутствует: {ROOT / MODEL}")
     write_config(output, options | {
-        "model": MODEL, "reid_model": REID_MODEL, "matcher": "graph",
+        "model": MODEL, "reid_model": REID_MODEL, "matcher": matcher,
         "memory": False, "geometry": False, "frame_stride": FRAME_STRIDE,
         "imgsz": IMGSZ, "conf": CONF,
         "camera_offset": [f"{c['camera_id']}={c.get('offset', 0)}" for c in cameras],
@@ -108,17 +145,13 @@ def main():
     parts = []
     for camera in cameras:
         part = output / f"camera_{camera['camera_id']}"
-        expected = tracking_config(camera["camera_id"])
-        reusable = False
-        if options.get("resume") and all((part / name).is_file() for name in (
-            "manifest.json", "performance.json", "observations.csv", "local_tracklets.json"
-        )):
-            from mtmct.cache import validate_cache
-            saved = validate_cache(part)["tracking_config"]
-            reusable = all(saved.get(key) == value for key, value in expected.items())
+        expected = tracking_config(camera["camera_id"], office_ids.get(camera["camera_id"]))
+        reusable = options.get("resume") and camera_cache_matches(part, camera, options, expected)
         if reusable:
             print(f"Reusing completed camera {camera['camera_id']}", flush=True)
         else:
+            (part/"manifest.json").unlink(missing_ok=True)
+            print(f"STAGE tracking: camera {camera['camera_id']} ({len(parts) + 1}/{len(cameras)})", flush=True)
             subprocess.run(
                 [sys.executable, "-u", "-m", "backend.worker", str(spec_path), str(camera["camera_id"])],
                 check=True,
@@ -147,27 +180,44 @@ def main():
     tracklets_path.write_text(json.dumps(tracklets), encoding="utf-8")
 
     print("STAGE association", flush=True)
+    associate_cameras(output, cameras, matcher)
+    print("STAGE completed", flush=True)
+
+
+def associate_cameras(output, cameras, matcher):
     from mtmct.association import Config
+    from mtmct.identity_v2 import OFFICE_SETTINGS
     from mtmct.link import run as link
     from mtmct.time_sync import CameraTransitionModel
 
+    office_ids = office_camera_ids(cameras)
     fps = {c["camera_id"]: c["fps"] for c in cameras}
     offsets = {c["camera_id"]: c.get("offset", 0) for c in cameras}
-    topology = CameraTransitionModel.from_json(TOPOLOGY) if all(c in range(5) for c in fps) else None
+    topology = None
+    if office_ids:
+        preset = CameraTransitionModel.from_json(TOPOLOGY)
+        actual = {office: camera for camera, office in office_ids.items()}
+        topology = CameraTransitionModel(
+            {(actual[a], actual[b]): route for (a, b), route in preset.routes.items()},
+            {frozenset(actual[c] for c in pair) for pair in preset.overlap_pairs},
+            {frozenset(actual[c] for c in pair) for pair in preset.disjoint_pairs},
+        )
     link(
         output,
         Config(
             appearance_weight=.92, spatial_weight=0, temporal_weight=.08,
             min_similarity=MIN_SIMILARITY, max_cost=.40,
             max_gap_seconds=GLOBAL_MAX_GAP_SECONDS, camera_fps=fps,
+            max_interior_gap_seconds=GLOBAL_MAX_GAP_SECONDS,
             camera_offsets_s=offsets, transition_model=topology,
-            gallery_weight=GALLERY_WEIGHT, part_weight=PART_WEIGHT,
+            gallery_weight=.25 if matcher == "v2" else GALLERY_WEIGHT, part_weight=PART_WEIGHT,
             use_geometry=False, use_time=True,
         ),
-        matcher="graph", allow_same_camera_fragments=True, memory=False,
+        matcher=matcher, allow_same_camera_fragments=True, memory=False,
+        v2_settings=OFFICE_SETTINGS if office_ids else None,
+        repair_occlusions=matcher == "v2",
         min_observations=MIN_OBSERVATIONS,
     )
-    print("STAGE completed", flush=True)
 
 
 if __name__ == "__main__":

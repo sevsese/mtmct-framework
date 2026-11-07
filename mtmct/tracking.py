@@ -16,7 +16,7 @@ from .geometry import calibration_maps, camera_number, project_pixel
 from .reid import ReID, normalized
 from .export import FIELDS
 from .cache import write_manifest
-from .features import MAX_SAMPLES, crop_quality
+from .features import MAX_SAMPLES, crop_quality_details
 from .frame_sources import FrameSource
 
 
@@ -27,7 +27,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
         cameras: list[int] | None = None, tracker: str | Path = "bytetrack.yaml",
         camera_sources: dict[int, Path] | None = None, fps_fallback: float = 30.0,
         frame_ids: set[int] | None = None, max_seconds: float | None = None,
-        zoom_rois: dict | None = None, exclude_rois: dict | None = None):
+        zoom_rois: dict | None = None, exclude_rois: dict | None = None,
+        min_person_sizes: dict | None = None):
     from ultralytics import YOLO
     if stride<1 or sample_every<1:
         raise ValueError("stride and sample_every must be positive")
@@ -68,7 +69,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
             H = calibration.get(cam)
             if H is None:
                 print(f'Camera {cam}: no verified floor projection; using appearance-only positions')
-            reader = FrameSource(video, fps=fps_fallback)
+            reader = FrameSource(video, fps=fps_fallback, reuse_buffer=True)
             model = YOLO(model_name)  # independent ByteTrack instance per camera
             print(f'Processing camera {cam}: {video}', flush=True)
             video_fps = reader.fps
@@ -80,7 +81,7 @@ def run(scene_dir: Path, output: Path, model_name: str,
             # id -> data. Only a sum and count for embeddings, not every crop.
             by_id=defaultdict(lambda: {"start_frame":10**12,"end_frame":-1,
                                        "positions":[],"embedding_sum":None,"samples":0,
-                                       "feature_samples":[]})
+                                       "feature_samples":[], "temporal_samples":[], "temporal_step":1})
             fid=0
             processed=0
             if device.startswith("cuda"):
@@ -90,10 +91,10 @@ def run(scene_dir: Path, output: Path, model_name: str,
             started=time.perf_counter()
             zoom = zoom_log = None
             try:
-                if cam in (zoom_rois or {}) or cam in (exclude_rois or {}):
+                if cam in (zoom_rois or {}) or cam in (exclude_rois or {}) or cam in (min_person_sizes or {}):
                     from .corridor_zoom import ZoomTracker
                     zoom_log = (output/f"zoom_camera_{cam+1}.csv").open("w",newline="")
-                    zoom = ZoomTracker(model,(zoom_rois or {}).get(cam),tracker,zoom_log,(exclude_rois or {}).get(cam))
+                    zoom = ZoomTracker(model,(zoom_rois or {}).get(cam),tracker,zoom_log,(exclude_rois or {}).get(cam), (min_person_sizes or {}).get(cam, (0., 0.)))
                 for fid, frame in reader.iter_frames(camera_max_frames, stride, frame_ids):
                     result=zoom.step(frame,fid,imgsz,conf,device) if zoom else model.track(frame,persist=True,tracker=str(tracker),
                                        classes=[0],conf=conf,imgsz=imgsz,
@@ -136,16 +137,28 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                 if crop.size:
                                     crops.append(cv2.cvtColor(crop,cv2.COLOR_BGR2RGB))
                                     clipped = x1 <= 0 or y1 <= 0 or x2 >= w or y2 >= h
-                                    sampled_keys.append((local_id, crop_quality(crops[-1], float(score), clipped)))
+                                    details = crop_quality_details(crops[-1], float(score), clipped)
+                                    other = rects[ids != local_id]
+                                    covered = np.maximum(0, np.minimum(other[:, 2:], [x2,y2])
+                                                         - np.maximum(other[:, :2], [x1,y1])).prod(axis=1)
+                                    details["occlusion_proxy"] = min(1., float(covered.max(initial=0)) / ((x2-x1)*(y2-y1)))
+                                    quality = details["det"] * details["border"] * (.5*details["size"] + .5*details["sharpness"])
+                                    sampled_keys.append((local_id, quality, details))
                     embeddings=reid.encode(crops)
                     processed += 1
-                    for (lid,quality),e in zip(sampled_keys,embeddings):
+                    for (lid,quality,details),e in zip(sampled_keys,embeddings):
                         row=by_id[lid]
                         if row["embedding_sum"] is None:
                             row["embedding_sum"]=np.zeros_like(e,dtype=np.float64)
                         row["embedding_sum"]+=e
+                        vector = e.tolist()
+                        if row["samples"] % row["temporal_step"] == 0:
+                            row["temporal_samples"].append((fid,vector,quality))
+                            if len(row["temporal_samples"]) > 256:
+                                row["temporal_samples"] = row["temporal_samples"][::2]
+                                row["temporal_step"] *= 2
                         row["samples"]+=1
-                        row["feature_samples"].append((quality,fid,e.tolist()))
+                        row["feature_samples"].append((quality,fid,vector,details))
                         row["feature_samples"] = sorted(
                             row["feature_samples"], key=lambda sample: -sample[0])[:MAX_SAMPLES]
                     if fid%100==0:
@@ -189,6 +202,10 @@ def run(scene_dir: Path, output: Path, model_name: str,
                                   "feature_quality":[sample[0] for sample in track["feature_samples"]],
                                   "feature_frames":[sample[1] for sample in track["feature_samples"]],
                                   "feature_vectors":[sample[2] for sample in track["feature_samples"]],
+                                  "feature_quality_details":[sample[3] for sample in track["feature_samples"]],
+                                  "temporal_frames":[sample[0] for sample in track["temporal_samples"]],
+                                  "temporal_vectors":[sample[1] for sample in track["temporal_samples"]],
+                                  "temporal_quality":[sample[2] for sample in track["temporal_samples"]],
                                   "samples":track["samples"]})
             del model
             if device.startswith("cuda"):
@@ -213,7 +230,8 @@ def run(scene_dir: Path, output: Path, model_name: str,
                 "source_fps":{str(c):fps for c,fps in source_fps.items()},
                 "fps_fallback":fps_fallback,
                 "frame_ids": sorted(frame_ids) if frame_ids is not None else None,
-                "max_seconds": max_seconds,"zoom_rois":zoom_rois,"exclude_rois":exclude_rois},
+                "max_seconds": max_seconds,"zoom_rois":zoom_rois,"exclude_rois":exclude_rois,
+                "min_person_sizes": min_person_sizes},
     )
     print(f"Wrote {len(summaries)} tracklets to {output/'local_tracklets.json'}")
 

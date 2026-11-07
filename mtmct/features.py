@@ -18,14 +18,20 @@ def normalize(vector):
     return vector / norm if norm > 1e-12 else vector
 
 
-def crop_quality(crop: np.ndarray, confidence: float, clipped: bool = False) -> float:
+def crop_quality_details(crop: np.ndarray, confidence: float, clipped: bool = False) -> dict:
+    det = float(np.clip(confidence, 0., 1.))
+    border = 0.5 if clipped else 1.0
     if crop.size == 0:
-        return 0.0
+        return {"det": det, "size": 0., "sharpness": 0., "border": border}
     area = min(crop.shape[0] * crop.shape[1] / (256 * 128), 1.0)
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
     sharpness = min(float(cv2.Laplacian(gray, cv2.CV_64F).var()) / 500.0, 1.0)
-    border = 0.5 if clipped else 1.0
-    return float(max(0.0, min(confidence, 1.0)) * border * (0.5 * area + 0.5 * sharpness))
+    return {"det": det, "size": area, "sharpness": sharpness, "border": border}
+
+
+def crop_quality(crop: np.ndarray, confidence: float, clipped: bool = False) -> float:
+    q = crop_quality_details(crop, confidence, clipped)
+    return q["det"] * q["border"] * (.5 * q["size"] + .5 * q["sharpness"])
 
 
 def aggregate(vectors, qualities=None, policy="mean", top_k=5, prototype_count=3):

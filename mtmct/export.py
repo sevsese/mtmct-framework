@@ -21,7 +21,8 @@ def export_predictions(observations_path: str | Path,
                        height: float = 1.7,
                        width: float = 0.6,
                        length: float = 0.6,
-                       excluded_keys: set[tuple[int, int]] | None = None):
+                       excluded_keys: set[tuple[int, int]] | None = None,
+                       excluded_observations: set[tuple[int, int, int]] | None = None):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     with open(mapping_path, encoding="utf-8") as f:
@@ -32,11 +33,14 @@ def export_predictions(observations_path: str | Path,
     with open(observations_path, newline="", encoding="utf-8") as fi, \
          open(out_csv, "w", newline="",encoding="utf-8") as fo:
         reader = csv.DictReader(fi)
-        writer = csv.DictWriter(fo, fieldnames=FIELDS+["global_id"])
+        optional = ["timestamp_s"] if "timestamp_s" in (reader.fieldnames or ()) else []
+        writer = csv.DictWriter(fo, fieldnames=FIELDS+optional+["global_id"])
         writer.writeheader()
         for r in reader:
             key=(int(r["camera_id"]),int(r["local_id"]))
             if key not in mp or (excluded_keys and key in excluded_keys):
+                continue
+            if excluded_observations and (*key, int(r["frame_id"])) in excluded_observations:
                 continue
             g=mp[key]
             writer.writerow({**r,"global_id":g})
