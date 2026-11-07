@@ -6,7 +6,7 @@ import pytest
 
 from mtmct.association import Config
 from mtmct.identity_store import prior_revocations, register
-from mtmct.identity_v2 import associate_v2
+from mtmct.identity_v2 import OFFICE_SETTINGS, associate_v2, observed_lifetime
 from mtmct.refinement import split_sustained
 from mtmct.scoring import Evidence, physical, score
 from mtmct.time_sync import CameraTransitionModel
@@ -92,3 +92,29 @@ def test_local_split_requires_sustained_appearance_and_motion_jump():
     parts, remap, _ = split_sustained([track],cfg)
     assert [(t["start_frame"],t["end_frame"]) for t in parts] == [(0,2),(3,9)]
     assert [r["new_local_id"] for r in remap] == [1,2]
+
+
+def test_office_clothing_cannot_override_weak_reid_between_cameras():
+    cfg = Config(use_geometry=False, min_similarity=.45, gallery_weight=.25, part_weight=.3)
+    a = row(1, 1)
+    b = row(2, 1, embedding=(.703, math.sqrt(1 - .703**2)))
+    for t in (a, b):
+        t["body_parts"] = [{"upper":[1,0],"lower":[1,0]}]
+    _, groups, edges = associate_v2([a, b], cfg, settings=OFFICE_SETTINGS)
+    assert len(groups) == 2
+    assert edges[0]["reason"] == "weak_cross_camera_reid"
+
+
+def test_office_handoff_repairs_partial_bbox_without_joining_two_people():
+    cfg = Config(use_geometry=False)
+    a, b = row(1, 1), row(1, 2, 8)
+    a["observation_boxes"] = {str(f): [20,20,40,55] for f in a["observation_frames"]}
+    b["observation_boxes"] = {str(f): [10,20,50,100] for f in b["observation_frames"]}
+    tracks, groups, edges = associate_v2([a,b], cfg, settings=OFFICE_SETTINGS)
+    assert groups == [[0,1]]
+    assert edges[0]["reason"] == "overlapping_handoff"
+    assert observed_lifetime(tracks) == pytest.approx(18 / 25)
+    b["observation_boxes"]["9"] = [30,20,70,100]
+    _, groups, edges = associate_v2([a,b], cfg, settings=OFFICE_SETTINGS)
+    assert len(groups) == 2
+    assert edges[0]["reason"] == "same_camera_same_observation_time"

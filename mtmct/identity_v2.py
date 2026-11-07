@@ -10,7 +10,7 @@ from math import isfinite
 
 import numpy as np
 
-from .scoring import Evidence, physical, score
+from .scoring import Evidence, physical, same_view_continuity, score
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,29 @@ class Settings:
     anchor_quality: float = .25
     single_attach_margin: float = .03
     unsupported_similarity: float = .55
+    min_lifetime_s: float = 0.
+    cross_camera_mean: float | None = None
+    cross_camera_gallery: float = .67
+    cross_camera_quality: float = .30
+    recover_same_view: bool = False
+
+
+OFFICE_SETTINGS = Settings(min_lifetime_s=.75, cross_camera_mean=.72, recover_same_view=True)
+
+
+def observed_lifetime(tracks):
+    intervals = []
+    for track in tracks:
+        samples = sorted(track.time(f) for f in track.frames)
+        for i, t in enumerate(samples):
+            end = samples[i+1] if i+1 < len(samples) and samples[i+1]-t <= .24 else t+1/track.fps
+            intervals.append((t, end))
+    total = 0.
+    end = float("-inf")
+    for start, stop in sorted(intervals):
+        total += max(0., stop-max(start, end))
+        end = max(end, stop)
+    return total
 
 
 def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Settings()):
@@ -41,7 +64,8 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
     revoked = {frozenset(pair) for pair in revoked}
     parent = list(range(len(tracks)))
     members = {i: {i} for i in parent}
-    anchors = {i for i, t in enumerate(tracks) if t.anchor}
+    anchors = {i for i, t in enumerate(tracks) if t.anchor and
+               (not settings.min_lifetime_s or observed_lifetime([t]) >= settings.min_lifetime_s)}
     # Fixed for this offline pass. Provisional attachments cannot reinforce
     # future decisions through the appearance memory.
     trusted = set(anchors)
@@ -56,12 +80,24 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
     def context(i, j):
         return physical(tracks[i], tracks[j], cfg)
 
+    @lru_cache(maxsize=None)
+    def recovery(i, j):
+        a, b = tracks[i], tracks[j]
+        if not settings.recover_same_view or a.key[0] != b.key[0]:
+            return None
+        mean = float(a.mean @ b.mean) if a.mean.size and a.mean.shape == b.mean.shape else None
+        return same_view_continuity(a, b, mean)
+
     def veto(i, j):
         if frozenset((tracks[i].uid, tracks[j].uid)) in revoked:
             return "revoked_by_review"
         if not same_camera and tracks[i].key[0] == tracks[j].key[0]:
             return "same_camera_disabled"
-        return context(min(i, j), max(i, j))["conflict"]
+        i, j = min(i, j), max(i, j)
+        conflict = context(i, j)["conflict"]
+        if conflict == "same_camera_same_observation_time" and recovery(i, j):
+            return None
+        return conflict
 
     def compatible(a, b):
         return all(not veto(i, j) for i in members[a] for j in members[b])
@@ -86,6 +122,25 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
                 edge.update(state=state, reason=reason)
                 continue
             edge.update(score(left, right, cfg, context(i, j), settings.gallery))
+            seam = recovery(i, j)
+            if seam:
+                edge.update(conflict=None, continuity=seam, state="candidate", decision="deferred",
+                            reason="verified_same_view_continuity")
+                continue
+            same_view = left.key[0] == right.key[0]
+            if same_view and settings.recover_same_view:
+                edge["reason"] = "no_same_view_continuity"
+                continue
+            if not same_view and settings.cross_camera_mean is not None:
+                parts = edge["appearance_components"]
+                if (min(left.quality, right.quality) < settings.cross_camera_quality
+                        or min(len(left.prototypes), len(right.prototypes)) < 2):
+                    edge["reason"] = "insufficient_cross_camera_crop_quality"
+                    continue
+                if (parts.get("mean", -1.) < settings.cross_camera_mean
+                        or parts.get("gallery_top3", -1.) < settings.cross_camera_gallery):
+                    edge["reason"] = "weak_cross_camera_reid"
+                    continue
             similarity = edge["similarity"]
             independent_geometry = edge["sync_samples"] >= 2 and edge["spatial"] <= .25
             long_gap = cfg.use_time and edge["gap_s"] > cfg.max_gap_seconds
@@ -105,6 +160,16 @@ def associate_v2(tracklets, cfg, *, same_camera=True, revoked=(), settings=Setti
                 candidates[i, j] = edge
                 neighbors[i].append((edge["cost"], j))
                 neighbors[j].append((edge["cost"], i))
+
+    continuity_edges = sorted((e for e in edges if e.get("continuity")),
+                              key=lambda e: (-e["appearance_components"]["mean"], e["i"], e["j"]))
+    for edge in continuity_edges:
+        a, b = root(edge["i"]), root(edge["j"])
+        if a != b and compatible(a, b):
+            unite(a, b)
+            edge.update(state="confirmed", decision="accepted", reason=edge["continuity"], stage="continuity")
+        elif a != b:
+            edge.update(reason="component_conflict")
 
     shortlist = {(min(i, j), max(i, j)) for i, items in neighbors.items()
                  for _, j in sorted(items)[:settings.top_k]}
@@ -226,6 +291,17 @@ def link_v2(run_dir, manifest, tracklets, cfg, *, scene_id=0, same_camera=True,
         revocations = prior_revocations(registry)
     tracks, groups, edges = associate_v2(tracklets, cfg, same_camera=same_camera,
                                          revoked=revocations, settings=settings)
+    short = []
+    if settings.min_lifetime_s:
+        retained = []
+        for group in groups:
+            lifetime = observed_lifetime([tracks[i] for i in group])
+            if lifetime < settings.min_lifetime_s:
+                short.append({"tracklets": [tracks[i].uid for i in group],
+                              "observed_seconds": round(lifetime, 3)})
+            else:
+                retained.append(group)
+        groups = retained
     provenance = {"scene": manifest.get("scene"), "inputs": manifest.get("inputs"),
                   "models": manifest.get("models")}
     scope = hashlib.sha256(json.dumps(provenance if provenance["inputs"] else str(run_dir.resolve()),
@@ -237,6 +313,7 @@ def link_v2(run_dir, manifest, tracklets, cfg, *, scene_id=0, same_camera=True,
                        "max_cost": cfg.max_cost, "min_similarity": cfg.min_similarity,
                        "long_gap_s": cfg.max_gap_seconds}
     state["local_corrections"] = {"switches": local_diagnostics, "duplicates": duplicates}
+    state["short_unconfirmed"] = short
     for filename, content in (("identity_state.json", state), ("association_edges.json", edges),
                               ("refined_tracklets.json", tracklets)):
         (run_dir/filename).write_text(json.dumps(content, ensure_ascii=False, allow_nan=False), encoding="utf-8")
@@ -244,5 +321,24 @@ def link_v2(run_dir, manifest, tracklets, cfg, *, scene_id=0, same_camera=True,
     if remap:
         source = run_dir/"refined_observations.csv"
         rewrite_observations(run_dir/"observations.csv", source, remap)
-    out_csv, out_txt = export_predictions(source, run_dir/"global_ids.json", run_dir, scene_id=scene_id)
+    suppressed_boxes = set()
+    if settings.recover_same_view:
+        for group in groups:
+            best = {}
+            for i in group:
+                track = tracks[i]
+                cam, local = track.key
+                for frame, (x1,y1,x2,y2) in track.row.get("observation_boxes", {}).items():
+                    key = cam, int(frame)
+                    box = (cam, local, int(frame))
+                    area = (x2-x1)*(y2-y1)
+                    previous = best.get(key)
+                    if previous is None or area > previous[0]:
+                        if previous is not None:
+                            suppressed_boxes.add(previous[1])
+                        best[key] = (area, box)
+                    else:
+                        suppressed_boxes.add(box)
+    out_csv, out_txt = export_predictions(source, run_dir/"global_ids.json", run_dir, scene_id=scene_id,
+                                         excluded_observations=suppressed_boxes)
     return tracklets, mapping, edges, out_csv, out_txt

@@ -118,6 +118,7 @@ def main():
     p.add_argument("--model",default=None,help="Reject cache created with another detector")
     p.add_argument("--matcher",choices=["baseline","graph","v2"],default="baseline")
     p.add_argument("--v2-gallery",choices=["mean","max","topk"],default="max")
+    p.add_argument("--office-guards",action="store_true",help="Office appearance, continuity and lifetime checks for v2")
     p.add_argument("--v2-features",type=Path,help="Optional feature cache for the same tracklets")
     p.add_argument("--revoke",type=Path,help="JSON list of UID pairs to keep separate on this v2 pass")
     p.add_argument("--camera-start",action="append",default=[],metavar="CAMERA=SECONDS")
@@ -151,12 +152,16 @@ def main():
                transition_model=CameraTransitionModel.from_json(a.topology) if a.topology else None)
     if not a.time:
         cfg.temporal_weight=0.0
-    from .identity_v2 import Settings
+    from dataclasses import replace
+    from .identity_v2 import OFFICE_SETTINGS, Settings
+    if a.office_guards and a.matcher != "v2":
+        p.error("--office-guards requires --matcher v2")
     tracklets,mapping,edges,out_csv,out_txt=run(
         a.run_dir,cfg,a.scene_id,a.model,a.matcher,a.allow_same_camera_fragments,
         a.memory,a.memory_similarity,a.correct_identities,
         repair_occlusions=a.repair_occlusions,min_observations=a.min_observations,
-        v2_settings=Settings(gallery=a.v2_gallery), v2_features=a.v2_features,
+        v2_settings=replace(OFFICE_SETTINGS if a.office_guards else Settings(), gallery=a.v2_gallery),
+        v2_features=a.v2_features,
         revocations=json.loads(a.revoke.read_text(encoding="utf-8")) if a.revoke else None)
     accepted=sum(edge.get("decision")=="accepted" for edge in edges) if a.matcher!="baseline" else len(edges)
     print(f"Local tracklets: {len(tracklets)}, accepted edges: {accepted}, global IDs: {len(set(mapping.values()))}")

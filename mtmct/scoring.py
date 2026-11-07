@@ -116,13 +116,15 @@ class Evidence:
 
 def appearance(a, b, cfg, gallery="topk"):
     values = []
+    top3 = None
     if a.mean.size and a.mean.shape == b.mean.shape:
         values.append(("mean", float(a.mean @ b.mean), 1 - cfg.gallery_weight))
     if gallery != "mean" and a.prototypes and b.prototypes:
         left, right = np.array([p["e"] for p in a.prototypes]), np.array([p["e"] for p in b.prototypes])
         if left.shape[1] == right.shape[1]:
             scores = (left @ right.T).ravel()
-            similarity = float(scores.max() if gallery == "max" else np.sort(scores)[-min(3, len(scores)):].mean())
+            top3 = float(np.sort(scores)[-min(3, len(scores)):].mean())
+            similarity = float(scores.max()) if gallery == "max" else top3
             values.append(("gallery", similarity, cfg.gallery_weight))
     if not values:
         return None, {}
@@ -141,10 +143,50 @@ def appearance(a, b, cfg, gallery="topk"):
                 if shared:
                     parts.append(float(np.mean(shared)))
     details = {name: score for name, score, _ in values}
+    if top3 is not None:
+        details["gallery_top3"] = top3
     if parts:
         details["parts"] = float(np.mean(sorted(parts)[-3:]))
         similarity = (1 - cfg.part_weight) * similarity + cfg.part_weight * details["parts"]
     return float(np.clip(similarity, -1, 1)), details
+
+
+def same_view_continuity(a, b, mean):
+    """Recover a short handoff using image boxes, without floor geometry."""
+    if a.key[0] != b.key[0] or mean is None:
+        return None
+    if a.interval[0] > b.interval[0]:
+        a, b = b, a
+    left, right = (t.row.get("observation_boxes", {}) for t in (a, b))
+    common = sorted(a.frames & b.frames)
+    if common:
+        # A persistent overlap between two full people is never a handoff.
+        # Only a short seam or a nearly fully shadowed brief duplicate qualifies.
+        seam = a.time(common[-1]) - a.time(common[0]) <= .20
+        duplicate = (min(len(a.frames), len(b.frames)) <= 20
+                     and len(common) >= .85 * min(len(a.frames), len(b.frames)))
+        if len(common) < 2 or not (seam or duplicate) or mean < (.70 if duplicate else .82):
+            return None
+        for frame in common:
+            if str(frame) not in left or str(frame) not in right:
+                return None
+            x, y = (np.asarray(boxes[str(frame)]) for boxes in (left, right))
+            sizes = np.maximum(0, np.array([x[2:]-x[:2], y[2:]-y[:2]]))
+            area = sizes.prod(axis=1)
+            overlap = np.maximum(0, np.minimum(x[2:],y[2:])-np.maximum(x[:2],y[:2])).prod()
+            if (min(area) <= 0 or overlap < .90 * min(area) or min(area) > .75 * max(area)
+                    or abs(x[1]-y[1]) > .15 * max(sizes[:,1])):
+                return None
+        return "shadowed_duplicate" if duplicate else "overlapping_handoff"
+    gap = b.interval[0] - a.interval[1]
+    if not 0 < gap <= 1.8 or mean < (.62 if gap <= .50 else .74) or not left or not right:
+        return None
+    x, y = np.array(left[max(left, key=int)]), np.array(right[min(right, key=int)])
+    h = max(x[3]-x[1], y[3]-y[1], 1.)
+    center_x, center_y = (x[:2]+x[2:])/2, (y[:2]+y[2:])/2
+    if np.linalg.norm(center_x-center_y) <= h * (.30 + .45*gap):
+        return "short_gap_recovery"
+    return None
 
 
 def _geometry(a, b, overlapping, cfg):

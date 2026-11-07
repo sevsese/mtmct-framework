@@ -153,6 +153,7 @@ def main():
 
     print("STAGE association", flush=True)
     from mtmct.association import Config
+    from mtmct.identity_v2 import OFFICE_SETTINGS
     from mtmct.link import run as link
     from mtmct.time_sync import CameraTransitionModel
 
@@ -179,6 +180,7 @@ def main():
             use_geometry=False, use_time=True,
         ),
         matcher=matcher, allow_same_camera_fragments=True, memory=False,
+        v2_settings=OFFICE_SETTINGS if office_ids else None,
         repair_occlusions=matcher == "v2",
         min_observations=MIN_OBSERVATIONS,
     )

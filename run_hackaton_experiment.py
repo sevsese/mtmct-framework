@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from mtmct.association import Config
+from mtmct.identity_v2 import OFFICE_SETTINGS
 from mtmct.cache import write_config
 from mtmct.floor_map import build_floor_tracks, render_floor_tracks
 from mtmct.link import run as link
@@ -101,6 +102,7 @@ def main(duration_seconds=DURATION_SECONDS, matcher="v2"):
                  use_geometry=False, use_time=True)
     tracklets, mapping, _, predictions, _ = link(
         out, cfg, matcher=matcher, allow_same_camera_fragments=True, memory=False,
+        v2_settings=OFFICE_SETTINGS if matcher == "v2" else None,
         repair_occlusions=matcher == "v2",
         min_observations=MIN_OBSERVATIONS)
     finish(out,sources,tracklets,mapping,predictions,duration_seconds, matcher == "graph")
