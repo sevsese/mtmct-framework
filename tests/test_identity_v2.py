@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 import math
 import sqlite3
 
@@ -89,7 +90,8 @@ def test_local_split_requires_sustained_appearance_and_motion_jump():
     cfg = Config(use_geometry=False)
     assert len(split_sustained([track],cfg)[0]) == 1
     track["observation_boxes"]["3"] = [100,0,110,20]
-    parts, remap, _ = split_sustained([track],cfg)
+    parts, remap, diagnostics = split_sustained([track],cfg)
+    assert json.loads(json.dumps(diagnostics))[0]["split"] is True
     assert [(t["start_frame"],t["end_frame"]) for t in parts] == [(0,2),(3,9)]
     assert [r["new_local_id"] for r in remap] == [1,2]
 

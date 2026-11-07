@@ -178,11 +178,17 @@ def main():
     tracklets_path.write_text(json.dumps(tracklets), encoding="utf-8")
 
     print("STAGE association", flush=True)
+    associate_cameras(output, cameras, matcher)
+    print("STAGE completed", flush=True)
+
+
+def associate_cameras(output, cameras, matcher):
     from mtmct.association import Config
     from mtmct.identity_v2 import OFFICE_SETTINGS
     from mtmct.link import run as link
     from mtmct.time_sync import CameraTransitionModel
 
+    office_ids = office_camera_ids(cameras)
     fps = {c["camera_id"]: c["fps"] for c in cameras}
     offsets = {c["camera_id"]: c.get("offset", 0) for c in cameras}
     topology = None
@@ -210,7 +216,6 @@ def main():
         repair_occlusions=matcher == "v2",
         min_observations=MIN_OBSERVATIONS,
     )
-    print("STAGE completed", flush=True)
 
 
 if __name__ == "__main__":

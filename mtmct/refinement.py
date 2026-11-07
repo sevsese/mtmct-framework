@@ -166,7 +166,7 @@ def split_sustained(tracklets, cfg):
             u1, v1, u2, v2 = box_b
             jump = np.hypot((x1+x2-u1-u2)/2, y2-v2) / max(y2-y1, v2-v1, 1.)
             dt = track.time(right) - track.time(left)
-            confirmed = 0 < dt <= 1.0 and jump > .9 + 2 * dt
+            confirmed = bool(0 < dt <= 1.0 and jump > .9 + 2 * dt)
             diagnostics.append({"camera_id": c, "local_id": lid, "frame": right,
                                 "cosine": similarity, "box_jump_heights": float(jump), "split": confirmed})
             if confirmed:
